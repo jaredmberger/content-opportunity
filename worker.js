@@ -1,5 +1,6 @@
 import scoringConfig from './config/scoring.json' with { type: 'json' };
 import { discoverOpportunities, summarizeOpportunities } from './src/discovery.js';
+import { fetchSiteInventory } from './src/site-inventory.js';
 
 const json = (data, init = {}) => new Response(JSON.stringify(data, null, 2), {
   ...init,
@@ -42,10 +43,11 @@ export default {
       return json({
         ok: true,
         service: env.APP_NAME || 'CuratorOS Content Opportunity Finder',
-        version: '0.2.0',
+        version: '0.2.1',
         siteOrigin: env.SITE_ORIGIN || 'https://www.oceanliners.net',
         scoringVersion: scoringConfig.version,
-        workflowPersistence: env.OPPORTUNITY_STATE ? 'kv' : 'browser'
+        workflowPersistence: env.OPPORTUNITY_STATE ? 'kv' : 'browser',
+        siteInventory: 'live-index'
       }, { headers: corsHeaders });
     }
 
@@ -54,6 +56,18 @@ export default {
         ...scoringConfig,
         workflowStatuses: [...WORKFLOW_STATUSES]
       }, { headers: corsHeaders });
+    }
+
+    if (url.pathname === '/api/site-inventory' && request.method === 'GET') {
+      try {
+        const inventory = await fetchSiteInventory(env.SITE_ORIGIN || 'https://www.oceanliners.net');
+        return json({ ok: true, ...inventory }, { headers: corsHeaders });
+      } catch (error) {
+        return json({ ok: false, error: 'Unable to read site inventory', detail: error?.message || String(error) }, {
+          status: 502,
+          headers: corsHeaders
+        });
+      }
     }
 
     if (url.pathname === '/api/analyze' && request.method === 'POST') {
