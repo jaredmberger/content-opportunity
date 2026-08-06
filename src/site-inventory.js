@@ -24,27 +24,52 @@ function titleFromAnchor(innerHtml) {
     .trim());
 }
 
-export async function fetchSiteInventory(siteOrigin) {
-  const origin = String(siteOrigin || 'https://www.oceanliners.net').replace(/\/$/, '');
-  const indexUrl = `${origin}/sitemap`;
-  const response = await fetch(indexUrl, {
-    headers: {
-      'user-agent': 'CuratorOS-Content-Opportunity/0.2 (+https://content.oceanliners.net)'
-    }
-  });
+async function fetchIndexHtml(origin) {
+  const candidates = [
+    `${origin}/site-map`,
+    `${origin}/sitemap`,
+    `${origin}/site-map.html`,
+    `${origin}/sitemap.html`
+  ];
+  const failures = [];
 
-  if (!response.ok) {
-    throw new Error(`Site index returned HTTP ${response.status}`);
+  for (const indexUrl of candidates) {
+    try {
+      const response = await fetch(indexUrl, {
+        headers: {
+          accept: 'text/html,application/xhtml+xml',
+          'user-agent': 'CuratorOS-Content-Opportunity/0.8.1 (+https://content.oceanliners.net)'
+        },
+        cf: { cacheTtl: 300, cacheEverything: true }
+      });
+      if (!response.ok) {
+        failures.push(`${new URL(indexUrl).pathname}: HTTP ${response.status}`);
+        continue;
+      }
+      const html = await response.text();
+      if (!/<a\b/i.test(html)) {
+        failures.push(`${new URL(indexUrl).pathname}: no links found`);
+        continue;
+      }
+      return { indexUrl, html };
+    } catch (error) {
+      failures.push(`${new URL(indexUrl).pathname}: ${error?.message || String(error)}`);
+    }
   }
 
-  const html = await response.text();
+  throw new Error(`No usable site index found (${failures.join('; ')})`);
+}
+
+export async function fetchSiteInventory(siteOrigin) {
+  const origin = String(siteOrigin || 'https://www.oceanliners.net').replace(/\/$/, '');
+  const { indexUrl, html } = await fetchIndexHtml(origin);
   const anchorPattern = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   const seen = new Map();
   let match;
 
   while ((match = anchorPattern.exec(html))) {
     const url = sameOriginUrl(match[1], origin);
-    if (!url || url === `${origin}/sitemap`) continue;
+    if (!url || url === indexUrl) continue;
     const pathname = new URL(url).pathname;
     if (/\.(?:jpg|jpeg|png|gif|webp|svg|pdf|css|js|xml|json)$/i.test(pathname)) continue;
 
@@ -56,6 +81,7 @@ export async function fetchSiteInventory(siteOrigin) {
   }
 
   const pages = [...seen.values()].sort((a, b) => a.pathname.localeCompare(b.pathname));
+  if (!pages.length) throw new Error(`Site index ${indexUrl} returned no usable internal pages.`);
 
   return {
     source: indexUrl,
