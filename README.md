@@ -2,7 +2,7 @@
 
 Content Opportunity Finder is the editorial-planning engine for Ocean Liner Curator. It identifies where `oceanliners.net` should **Create**, **Expand**, **Connect**, or **Research** content and keeps the evidence behind every recommendation visible.
 
-## What exists in v0.4
+## What exists in v0.5
 
 - Cloudflare Worker runtime at `content.oceanliners.net`
 - CuratorOS-style responsive, iPad-friendly dashboard
@@ -10,6 +10,11 @@ Content Opportunity Finder is the editorial-planning engine for Ocean Liner Cura
 - Direct integration with the deployed CuratorOS Link Map dataset
 - High-confidence graph-derived internal-link opportunity generation
 - Focused topic/page discovery using page titles, URLs, clusters, and suggested graph connections
+- Search Intelligence snapshot persistence in Cloudflare KV
+- Direct Google Search Console page-export import from CSV or compatible JSON
+- Automatic merging of impressions, clicks, CTR, average position, and query counts into graph opportunities
+- Search-demand and striking-distance scoring during automatic discovery
+- Stable Search Intelligence API contract for a future standalone Search Intelligence service
 - JSON file upload and immediate analysis
 - Advanced/manual pasted JSON input for testing and specialized datasets
 - Live Site Inventory enrichment for supplied opportunities
@@ -18,12 +23,11 @@ Content Opportunity Finder is the editorial-planning engine for Ocean Liner Cura
 - Explainable weighted scoring
 - Four editorial action classes: Create, Expand, Connect, Research
 - Priority bands: High, Medium, Low
-- Evidence contributions shown per opportunity
 - Search and workflow filtering
 - Editorial notes on each opportunity
 - Workflow states: New, Reviewed, Accepted, In Progress, Completed, Deferred, Dismissed
-- Cloudflare KV-backed workflow persistence
-- Browser-local fallback if KV is unavailable
+- Cloudflare KV-backed persistence
+- Browser-local workflow fallback if KV is unavailable
 
 ## Cloudflare KV
 
@@ -41,19 +45,38 @@ Workflow records are stored under:
 content-opportunity:workflow:<opportunity-id>
 ```
 
-When the binding is present, KV is authoritative. Browser storage is only a fallback.
+The saved Search Intelligence snapshot is stored under:
+
+```text
+content-opportunity:search-intelligence:v1
+```
+
+When the binding is present, KV is authoritative.
 
 ## Main user workflows
 
 ### Automatic discovery
 
-Choose **Find Opportunities Automatically**. The Worker reads:
+Choose **Find Opportunities Automatically**. The Worker reads the current CuratorOS Link Map, generates high-confidence relationship gaps, merges any saved Search Intelligence metrics onto matching canonical pages, scores the resulting opportunities, and restores saved workflow state.
+
+### Search Intelligence import
+
+Choose **Import Search Console data** and select either:
+
+- a Google Search Console page export in `.csv` format, or
+- compatible `.json` containing page-level search rows.
+
+Recognized metrics include:
 
 ```text
-https://curator.oceanliners.net/link-map/link-map-data.json
+Page / Top pages / URL
+Clicks
+Impressions
+CTR / Average CTR
+Position / Average position
 ```
 
-It builds incoming/outgoing neighborhoods, finds same-type pages with strong shared graph neighbors but no direct connection, generates Connect opportunities, scores them, and merges saved workflow state from KV.
+The importer normalizes `www` and canonical URL forms, aggregates rows by page, calculates weighted average position, and saves the resulting page snapshot to KV. Automatic discovery is rerun after a successful import.
 
 ### Topic or page discovery
 
@@ -66,11 +89,11 @@ Cunard
 /ships/rms-olympic
 ```
 
-The dashboard focuses the automatically generated graph opportunities around matching page titles, URLs, clusters, and suggested connections.
+The dashboard focuses the automatically generated opportunities around matching page titles, URLs, clusters, and suggested connections.
 
-### File analysis
+### Specialized JSON analysis
 
-Choose a `.json` file. The dashboard loads it into the manual analysis pathway and runs it immediately.
+Choose a `.json` file from another CuratorOS tool or compatible source. The dashboard loads it into the manual analysis pathway and runs it immediately.
 
 ### Advanced/manual analysis
 
@@ -80,7 +103,7 @@ The pasted-JSON interface remains available under **Advanced / manual dataset** 
 
 ### `GET /api/health`
 
-Returns service/version status, persistence mode, Site Inventory capability, and Link Map discovery capability.
+Returns service/version status, persistence mode, Site Inventory capability, Link Map discovery capability, and Search Intelligence snapshot status.
 
 ### `GET /api/config`
 
@@ -94,9 +117,34 @@ Reads the public Ocean Liner Curator site index and returns a normalized invento
 
 Checks the current CuratorOS Link Map dataset and returns graph metadata.
 
+### `GET /api/search-intelligence`
+
+Returns the currently saved Search Intelligence snapshot and page metrics.
+
+### `POST /api/search-intelligence`
+
+Normalizes and saves Search Console/Search Intelligence rows to KV. This is also the stable publishing contract for a future standalone Search Intelligence service.
+
+Example:
+
+```json
+{
+  "source": "search-intelligence",
+  "rows": [
+    {
+      "page": "https://oceanliners.net/ships/rms-olympic",
+      "clicks": 42,
+      "impressions": 1350,
+      "ctr": 0.031,
+      "position": 11.8
+    }
+  ]
+}
+```
+
 ### `GET /api/discover`
 
-Runs automatic Link Map opportunity discovery and returns scored opportunities with saved workflow state.
+Runs automatic Link Map opportunity discovery. If a Search Intelligence snapshot exists, page metrics are merged before scoring.
 
 ### `POST /api/discover`
 
@@ -104,28 +152,7 @@ Same automatic discovery pathway with optional graph-generation settings.
 
 ### `POST /api/analyze`
 
-Accepts a supplied opportunity dataset, enriches it with live Site Inventory knowledge unless disabled, scores it, and merges saved workflow state.
-
-Example item:
-
-```json
-{
-  "title": "RMS Carmania",
-  "contentType": "ship guide",
-  "cluster": "Cunard · Edwardian Liners",
-  "canonicalUrl": null,
-  "entityMentions": 11,
-  "potentialLinks": 7,
-  "missingLinks": 7,
-  "clusterGap": true,
-  "clusterDepth": 10,
-  "searchImpressions": 620,
-  "averagePosition": 12.4,
-  "editorialImportance": 9,
-  "unresolvedQuestions": [],
-  "sources": ["site-index", "link-graph", "search-intelligence"]
-}
-```
+Accepts a supplied opportunity dataset, enriches it with live Site Inventory knowledge unless disabled, merges saved Search Intelligence unless disabled, scores it, and restores saved workflow state.
 
 ### `GET /api/workflow/:id`
 
@@ -156,19 +183,21 @@ Search demand is only one signal. Content Opportunity Finder is designed to serv
 ## Current architecture
 
 ```text
-Ocean Liner Curator Site Index ───────┐
-                                      ├──> Site Knowledge Enrichment ──┐
-Supplied / Imported Datasets ─────────┘                                │
-                                                                       ├──> Discovery + Scoring ──> Opportunity Queue ──> KV Workflow
-CuratorOS Link Map ──> Graph Opportunity Generator ────────────────────┘
+Ocean Liner Curator Site Index ──────────────┐
+                                             ├──> Site Knowledge Enrichment ──┐
+Supplied / Imported Datasets ────────────────┘                                │
+                                                                              ├──> Discovery + Scoring ──> Opportunity Queue ──> KV Workflow
+CuratorOS Link Map ──> Graph Opportunity Generator ───────────────────────────┤
+                                                                              │
+Search Console / Search Intelligence ──> KV Search Snapshot ──────────────────┘
 ```
 
 ## Next integrations
 
 Highest-value next targets:
 
-1. Search Intelligence / Search Console metrics as a live data feed
-2. Permanent CuratorOS Project Records / Entity Registry
-3. Automatic missing-topic generation from entities that recur in records but lack canonical pages
-4. Opportunity reconciliation when links/pages change
-5. Completed-opportunity verification and automatic re-opening when a problem returns
+1. Permanent CuratorOS Project Records / Entity Registry
+2. Automatic missing-topic generation from entities that recur in records but lack canonical pages
+3. Opportunity reconciliation when links/pages change
+4. Completed-opportunity verification and automatic re-opening when a problem returns
+5. Direct Search Intelligence service-to-service publishing when that application is deployed
