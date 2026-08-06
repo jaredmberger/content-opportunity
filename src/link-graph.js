@@ -1,9 +1,10 @@
-const DEFAULT_GRAPH_URL = 'https://curator.oceanliners.net/link-map/link-map-data.json';
+const DEFAULT_GRAPH_URL = 'https://curator.oceanliners.net/api/link-map';
+const FALLBACK_GRAPH_URL = 'https://curator.oceanliners.net/link-map/link-map-data.json';
 
 function pageType(url) {
   const path = new URL(url).pathname.toLowerCase();
   if (path.startsWith('/ships/') && path !== '/ships/ships') return 'ship';
-  if (path.includes('hub') || path === '/ships/ships' || path === '/explore' || path === '/site-map') return 'hub';
+  if (path.includes('hub') || path === '/ships/ships' || path === '/explore' || path === '/site-map' || path === '/sitemap') return 'hub';
   if (/why-|what-|how-|did-|could-|ocean-liner/.test(path.split('/').filter(Boolean).pop() || '')) return 'article';
   if (['/', '/about', '/sources', '/provenance', '/attribution', '/contact', '/project-scope'].includes(path.replace(/\/$/, '') || '/')) return 'core';
   return 'other';
@@ -23,18 +24,47 @@ function slugify(value = '') {
   return String(value).toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
+function normalizeGraphPayload(payload, source) {
+  const graph = payload?.graph || payload?.data || payload;
+  if (!Array.isArray(graph?.pages) || !Array.isArray(graph?.edges)) return null;
+  return {
+    ...graph,
+    source: graph.source || source,
+    pages: graph.pages.filter(page => page?.url),
+    edges: graph.edges.filter(edge => edge?.source && edge?.target)
+  };
+}
+
 export async function fetchLinkGraph(graphUrl = DEFAULT_GRAPH_URL) {
-  const response = await fetch(graphUrl, {
-    headers: {
-      accept: 'application/json',
-      'user-agent': 'CuratorOS-Content-Opportunity/0.4 (+https://content.oceanliners.net)'
-    },
-    cf: { cacheTtl: 300, cacheEverything: true }
-  });
-  if (!response.ok) throw new Error(`Link Map dataset returned HTTP ${response.status}`);
-  const graph = await response.json();
-  if (!Array.isArray(graph?.pages) || !Array.isArray(graph?.edges)) throw new Error('Link Map dataset is missing pages or edges.');
-  return graph;
+  const candidates = [...new Set([graphUrl, DEFAULT_GRAPH_URL, FALLBACK_GRAPH_URL].filter(Boolean))];
+  const failures = [];
+
+  for (const endpoint of candidates) {
+    try {
+      const response = await fetch(endpoint, {
+        headers: {
+          accept: 'application/json',
+          'user-agent': 'CuratorOS-Content-Opportunity/0.8.1 (+https://content.oceanliners.net)'
+        },
+        cf: { cacheTtl: 300, cacheEverything: true }
+      });
+      if (!response.ok) {
+        failures.push(`${new URL(endpoint).pathname}: HTTP ${response.status}`);
+        continue;
+      }
+      const payload = await response.json();
+      const graph = normalizeGraphPayload(payload, endpoint);
+      if (!graph) {
+        failures.push(`${new URL(endpoint).pathname}: missing pages/edges`);
+        continue;
+      }
+      return graph;
+    } catch (error) {
+      failures.push(`${new URL(endpoint).pathname}: ${error?.message || String(error)}`);
+    }
+  }
+
+  throw new Error(`No usable Link Map source found (${failures.join('; ')})`);
 }
 
 export function generateLinkOpportunities(graph, options = {}) {
@@ -122,4 +152,4 @@ export function generateLinkOpportunities(graph, options = {}) {
     .slice(0, maxOpportunities);
 }
 
-export { DEFAULT_GRAPH_URL };
+export { DEFAULT_GRAPH_URL, FALLBACK_GRAPH_URL };
