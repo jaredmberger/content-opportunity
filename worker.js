@@ -1,6 +1,7 @@
 import scoringConfig from './config/scoring.json' with { type: 'json' };
 import { discoverOpportunities, summarizeOpportunities } from './src/discovery.js';
 import { fetchSiteInventory } from './src/site-inventory.js';
+import { enrichWithSiteKnowledge } from './src/site-enrichment.js';
 
 const json = (data, init = {}) => new Response(JSON.stringify(data, null, 2), {
   ...init,
@@ -34,6 +35,7 @@ async function writeWorkflow(env, id, value) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    const siteOrigin = env.SITE_ORIGIN || 'https://www.oceanliners.net';
 
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: corsHeaders });
@@ -43,11 +45,13 @@ export default {
       return json({
         ok: true,
         service: env.APP_NAME || 'CuratorOS Content Opportunity Finder',
-        version: '0.2.1',
-        siteOrigin: env.SITE_ORIGIN || 'https://www.oceanliners.net',
+        version: '0.3.0',
+        siteOrigin,
         scoringVersion: scoringConfig.version,
         workflowPersistence: env.OPPORTUNITY_STATE ? 'kv' : 'browser',
-        siteInventory: 'live-index'
+        siteInventory: 'live-index',
+        automaticSiteEnrichment: true,
+        linkGapInspection: true
       }, { headers: corsHeaders });
     }
 
@@ -60,7 +64,7 @@ export default {
 
     if (url.pathname === '/api/site-inventory' && request.method === 'GET') {
       try {
-        const inventory = await fetchSiteInventory(env.SITE_ORIGIN || 'https://www.oceanliners.net');
+        const inventory = await fetchSiteInventory(siteOrigin);
         return json({ ok: true, ...inventory }, { headers: corsHeaders });
       } catch (error) {
         return json({ ok: false, error: 'Unable to read site inventory', detail: error?.message || String(error) }, {
@@ -73,7 +77,15 @@ export default {
     if (url.pathname === '/api/analyze' && request.method === 'POST') {
       try {
         const dataset = await request.json();
-        const opportunities = discoverOpportunities(dataset, scoringConfig);
+        let enrichedDataset = dataset;
+        let inventory = null;
+
+        if (dataset?.options?.useSiteInventory !== false) {
+          inventory = await fetchSiteInventory(siteOrigin);
+          enrichedDataset = await enrichWithSiteKnowledge(dataset, inventory, siteOrigin);
+        }
+
+        const opportunities = discoverOpportunities(enrichedDataset, scoringConfig);
 
         if (env.OPPORTUNITY_STATE) {
           await Promise.all(opportunities.map(async item => {
@@ -89,6 +101,8 @@ export default {
         return json({
           generatedAt: new Date().toISOString(),
           summary: summarizeOpportunities(opportunities),
+          siteKnowledge: enrichedDataset.siteKnowledge || null,
+          inventoryUsed: Boolean(inventory),
           opportunities
         }, { headers: corsHeaders });
       } catch (error) {
