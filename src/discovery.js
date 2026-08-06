@@ -9,6 +9,8 @@ function slugify(value = '') {
 }
 
 function typeFor(item) {
+  const explicit = String(item.opportunityType || '').toLowerCase();
+  if (['create', 'expand', 'connect', 'research'].includes(explicit)) return explicit;
   if ((item.unresolvedQuestions?.length ?? 0) > 0 && !item.canonicalUrl) return 'research';
   if (!item.canonicalUrl) return 'create';
   if ((item.potentialLinks ?? 0) >= 2 && (item.missingLinks ?? 0) > 0) return 'connect';
@@ -49,7 +51,9 @@ export function discoverOpportunities(dataset, config) {
         notes: item.notes || '',
         siteInventoryMatch: item.siteInventoryMatch || null,
         inventoryResolved: Boolean(item.inventoryResolved),
-        linkInspection: item.linkInspection || null
+        linkInspection: item.linkInspection || null,
+        graphEvidence: item.graphEvidence || null,
+        relatedUrls: Array.isArray(item.relatedUrls) ? item.relatedUrls : []
       };
 
       const scored = scoreOpportunity(base, config);
