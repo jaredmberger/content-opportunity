@@ -3,6 +3,9 @@ const els = {
   loadSample: document.querySelector('#loadSample'),
   analyze: document.querySelector('#analyze'),
   discover: document.querySelector('#discover'),
+  topicInput: document.querySelector('#topicInput'),
+  analyzeTopic: document.querySelector('#analyzeTopic'),
+  topicMeta: document.querySelector('#topicMeta'),
   chooseFile: document.querySelector('#chooseFile'),
   fileInput: document.querySelector('#fileInput'),
   fileName: document.querySelector('#fileName'),
@@ -107,9 +110,7 @@ function graphEvidence(item) {
   const rows = [];
   if (Number.isFinite(g.incomingLinks)) rows.push(`<div class="evidence-item"><strong>Current inbound links</strong>${esc(g.incomingLinks)}</div>`);
   if (Number.isFinite(g.sharedNeighborStrength)) rows.push(`<div class="evidence-item"><strong>Shared-neighbor strength</strong>${esc(g.sharedNeighborStrength)}</div>`);
-  if (Array.isArray(g.suggestions) && g.suggestions.length) {
-    rows.push(`<div class="evidence-item"><strong>Graph suggestions</strong>${esc(g.suggestions.length)} strong candidate${g.suggestions.length === 1 ? '' : 's'}</div>`);
-  }
+  if (Array.isArray(g.suggestions) && g.suggestions.length) rows.push(`<div class="evidence-item"><strong>Graph suggestions</strong>${esc(g.suggestions.length)} strong candidate${g.suggestions.length === 1 ? '' : 's'}</div>`);
   return rows.join('');
 }
 
@@ -170,8 +171,16 @@ function renderAll() { renderSummary(); renderResults(); }
 function acceptResults(data) {
   all = applyLocalWorkflow(data.opportunities || []);
   activeType = 'all';
+  els.searchQueue.value = '';
   renderFilters();
   renderAll();
+}
+
+function topicHaystack(item) {
+  const suggestions = Array.isArray(item.graphEvidence?.suggestions)
+    ? item.graphEvidence.suggestions.flatMap(s => [s.title, s.url])
+    : [];
+  return [item.title, item.canonicalUrl, item.cluster, item.type, ...suggestions].filter(Boolean).join(' ').toLowerCase();
 }
 
 async function saveWorkflow(event) {
@@ -185,9 +194,7 @@ async function saveWorkflow(event) {
   const record = { workflowStatus, notes, updatedAt: new Date().toISOString() };
 
   try {
-    const response = await fetch(`/api/workflow/${encodeURIComponent(id)}`, {
-      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(record)
-    });
+    const response = await fetch(`/api/workflow/${encodeURIComponent(id)}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(record) });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Save failed');
     if (data.persistence === 'kv') serverPersistence = 'kv';
@@ -208,14 +215,19 @@ async function saveWorkflow(event) {
   } finally { button.disabled = false; }
 }
 
+async function fetchAutomaticData() {
+  const response = await fetch('/api/discover', { cache: 'no-store' });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.detail || data.error || 'Automatic discovery failed');
+  return data;
+}
+
 async function discoverAutomatically() {
   els.discover.disabled = true;
   els.discover.textContent = 'Inspecting CuratorOS Link Map…';
   els.discoveryMeta.textContent = 'Reading the current graph and generating high-confidence relationship gaps…';
   try {
-    const response = await fetch('/api/discover', { cache: 'no-store' });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || data.error || 'Automatic discovery failed');
+    const data = await fetchAutomaticData();
     acceptResults(data);
     const graph = data.graph || {};
     els.discoveryMeta.textContent = `Analyzed ${graph.pages ?? 0} pages and ${graph.edges ?? 0} internal links · ${data.opportunities?.length ?? 0} opportunities surfaced.`;
@@ -228,14 +240,38 @@ async function discoverAutomatically() {
   }
 }
 
+async function analyzeTopic() {
+  const query = els.topicInput.value.trim().toLowerCase();
+  if (!query) {
+    els.topicMeta.textContent = 'Enter a ship, topic, page title, or URL fragment first.';
+    els.topicInput.focus();
+    return;
+  }
+  els.analyzeTopic.disabled = true;
+  els.analyzeTopic.textContent = 'Analyzing…';
+  els.topicMeta.textContent = `Finding graph opportunities related to “${els.topicInput.value.trim()}”…`;
+  try {
+    const data = await fetchAutomaticData();
+    const matches = (data.opportunities || []).filter(item => topicHaystack(item).includes(query));
+    acceptResults({ ...data, opportunities: matches });
+    els.topicMeta.textContent = matches.length
+      ? `${matches.length} opportunity${matches.length === 1 ? '' : 'ies'} found around “${els.topicInput.value.trim()}”.`
+      : `No high-confidence Link Map opportunities currently match “${els.topicInput.value.trim()}”.`;
+  } catch (error) {
+    els.results.innerHTML = `<div class="empty panel">${esc(error.message)}</div>`;
+    els.topicMeta.textContent = 'Focused discovery could not complete.';
+  } finally {
+    els.analyzeTopic.disabled = false;
+    els.analyzeTopic.textContent = 'Analyze';
+  }
+}
+
 async function analyze() {
   els.analyze.disabled = true;
   els.analyze.textContent = 'Analyzing site + opportunities…';
   try {
     const payload = JSON.parse(els.dataset.value || '{}');
-    const response = await fetch('/api/analyze', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload)
-    });
+    const response = await fetch('/api/analyze', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || data.error || 'Analysis failed');
     acceptResults(data);
@@ -265,6 +301,8 @@ async function importFile(event) {
 }
 
 els.discover.addEventListener('click', discoverAutomatically);
+els.analyzeTopic.addEventListener('click', analyzeTopic);
+els.topicInput.addEventListener('keydown', event => { if (event.key === 'Enter') analyzeTopic(); });
 els.chooseFile.addEventListener('click', chooseFile);
 els.fileInput.addEventListener('change', importFile);
 els.loadSample.addEventListener('click', loadSample);
