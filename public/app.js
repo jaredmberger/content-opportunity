@@ -18,8 +18,8 @@ let all = [];
 let activeType = 'all';
 let serverPersistence = 'browser';
 
-const esc = value => String(value ?? '').replace(/[&<>'"]/g, char => ({
-  '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+const esc = value => String(value ?? '').replace(/[&<>'\"]/g, char => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '\"': '&quot;'
 }[char]));
 
 function readLocalWorkflow() {
@@ -34,11 +34,8 @@ function writeLocalWorkflow(map) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(map));
 }
 
-function localRecord(id) {
-  return readLocalWorkflow()[id] || null;
-}
-
 function applyLocalWorkflow(items) {
+  if (serverPersistence === 'kv') return items;
   const workflow = readLocalWorkflow();
   return items.map(item => workflow[item.id] ? { ...item, ...workflow[item.id] } : item);
 }
@@ -158,12 +155,6 @@ async function saveWorkflow(event) {
   button.textContent = 'Saving…';
 
   const record = { workflowStatus, notes, updatedAt: new Date().toISOString() };
-  const workflow = readLocalWorkflow();
-  workflow[id] = record;
-  writeLocalWorkflow(workflow);
-
-  const index = all.findIndex(item => item.id === id);
-  if (index >= 0) all[index] = { ...all[index], ...record };
 
   try {
     const response = await fetch(`/api/workflow/${encodeURIComponent(id)}`, {
@@ -173,12 +164,28 @@ async function saveWorkflow(event) {
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Save failed');
-    if (data.persistence === 'kv') serverPersistence = 'kv';
+
+    if (data.persistence === 'kv') {
+      serverPersistence = 'kv';
+    } else {
+      const workflow = readLocalWorkflow();
+      workflow[id] = record;
+      writeLocalWorkflow(workflow);
+    }
+
+    const index = all.findIndex(item => item.id === id);
+    if (index >= 0) all[index] = { ...all[index], ...(data.record || record) };
+
     els.persistence.textContent = serverPersistence === 'kv' ? 'Workflow storage · Cloudflare KV' : 'Workflow storage · this browser';
-    button.textContent = 'Saved';
-    setTimeout(() => { button.textContent = 'Save'; }, 900);
+    button.textContent = data.persistence === 'kv' ? 'Saved to KV' : 'Saved locally';
+    setTimeout(() => { button.textContent = 'Save'; }, 1000);
     renderAll();
   } catch {
+    const workflow = readLocalWorkflow();
+    workflow[id] = record;
+    writeLocalWorkflow(workflow);
+    const index = all.findIndex(item => item.id === id);
+    if (index >= 0) all[index] = { ...all[index], ...record };
     button.textContent = 'Saved locally';
     setTimeout(() => { button.textContent = 'Save'; }, 1200);
     renderAll();
