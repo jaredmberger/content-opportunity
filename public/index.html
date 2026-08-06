@@ -34,19 +34,20 @@
 
     <section class="input-grid">
       <section class="panel input-card">
+        <p class="eyebrow">Focused Discovery</p>
+        <h3>Analyze a topic or page</h3>
+        <p>Type a ship, subject, page title, or URL fragment. CuratorOS will focus the graph-derived opportunity set around it.</p>
+        <div class="topic-preview"><input id="topicInput" type="search" placeholder="RMS Carmania, Cunard, Olympic, /ships/rms-olympic…" /><button id="analyzeTopic">Analyze</button></div>
+        <span class="file-name" id="topicMeta">Searches page titles, URLs, clusters, and suggested connections.</span>
+      </section>
+
+      <section class="panel input-card">
         <p class="eyebrow">Import</p>
         <h3>Analyze a file</h3>
         <p>Use a JSON dataset from Search Intelligence, Link Map, a CuratorOS export, or another compatible source.</p>
         <input id="fileInput" type="file" accept="application/json,.json" hidden />
         <button id="chooseFile" class="secondary">Choose JSON file</button>
         <span class="file-name" id="fileName">No file selected</span>
-      </section>
-
-      <section class="panel input-card">
-        <p class="eyebrow">Coming Next</p>
-        <h3>Analyze a topic or page</h3>
-        <p>Topic/page lookup will sit here next, using site inventory and graph context instead of requiring structured input.</p>
-        <div class="topic-preview"><input type="text" placeholder="RMS Carmania, Cunard, Olympic class…" disabled /><button disabled>Analyze</button></div>
       </section>
     </section>
 
