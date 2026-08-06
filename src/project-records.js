@@ -72,7 +72,7 @@ export async function fetchProjectRecords(endpoint = DEFAULT_PROJECT_RECORDS_URL
   const response = await fetch(endpoint, {
     headers: {
       accept: 'application/json',
-      'user-agent': 'CuratorOS-Content-Opportunity/0.7 (+https://content.oceanliners.net)'
+      'user-agent': 'CuratorOS-Content-Opportunity/0.9 (+https://content.oceanliners.net)'
     },
     cf: { cacheTtl: 120, cacheEverything: true }
   });
@@ -154,7 +154,9 @@ export function generateEntityOpportunities(snapshot, inventory, options = {}) {
       averagePosition: 0,
       editorialImportance: importance,
       unresolvedQuestions: unresolved,
-      sources: ['project-records'],
+      inventoryResolved: true,
+      siteInventoryMatch: null,
+      sources: ['project-records', 'site-inventory'],
       projectRecordEvidence: {
         recordId: id,
         recordType: type,
@@ -164,6 +166,7 @@ export function generateEntityOpportunities(snapshot, inventory, options = {}) {
         confidence,
         publicUrl: url,
         canonicalPageFound: false,
+        inventoryChecked: true,
         corpusVersion: snapshot?.version || 0,
         corpusUpdatedAt: snapshot?.updatedAt || null
       },
