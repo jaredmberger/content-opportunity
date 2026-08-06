@@ -6,6 +6,10 @@ compatibility_date = "2026-08-01"
 directory = "./public"
 binding = "ASSETS"
 
+[[kv_namespaces]]
+binding = "OPPORTUNITY_STATE"
+id = "afce711ea6844278b0d7fe059c739be2"
+
 [vars]
 SITE_ORIGIN = "https://www.oceanliners.net"
 APP_NAME = "CuratorOS Content Opportunity Finder"
