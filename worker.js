@@ -2,6 +2,7 @@ import scoringConfig from './config/scoring.json' with { type: 'json' };
 import { discoverOpportunities, summarizeOpportunities } from './src/discovery.js';
 import { fetchSiteInventory } from './src/site-inventory.js';
 import { enrichWithSiteKnowledge } from './src/site-enrichment.js';
+import { fetchLinkGraph, generateLinkOpportunities, DEFAULT_GRAPH_URL } from './src/link-graph.js';
 
 const json = (data, init = {}) => new Response(JSON.stringify(data, null, 2), {
   ...init,
@@ -32,6 +33,18 @@ async function writeWorkflow(env, id, value) {
   return true;
 }
 
+async function attachWorkflow(env, opportunities) {
+  if (!env.OPPORTUNITY_STATE) return opportunities;
+  await Promise.all(opportunities.map(async item => {
+    const saved = await readWorkflow(env, item.id);
+    if (!saved) return;
+    item.workflowStatus = saved.workflowStatus || item.workflowStatus;
+    item.notes = saved.notes || '';
+    item.updatedAt = saved.updatedAt || null;
+  }));
+  return opportunities;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -45,13 +58,15 @@ export default {
       return json({
         ok: true,
         service: env.APP_NAME || 'CuratorOS Content Opportunity Finder',
-        version: '0.3.0',
+        version: '0.4.0',
         siteOrigin,
         scoringVersion: scoringConfig.version,
         workflowPersistence: env.OPPORTUNITY_STATE ? 'kv' : 'browser',
         siteInventory: 'live-index',
         automaticSiteEnrichment: true,
-        linkGapInspection: true
+        linkGapInspection: true,
+        automaticGraphDiscovery: true,
+        linkMapSource: DEFAULT_GRAPH_URL
       }, { headers: corsHeaders });
     }
 
@@ -67,10 +82,47 @@ export default {
         const inventory = await fetchSiteInventory(siteOrigin);
         return json({ ok: true, ...inventory }, { headers: corsHeaders });
       } catch (error) {
-        return json({ ok: false, error: 'Unable to read site inventory', detail: error?.message || String(error) }, {
-          status: 502,
-          headers: corsHeaders
-        });
+        return json({ ok: false, error: 'Unable to read site inventory', detail: error?.message || String(error) }, { status: 502, headers: corsHeaders });
+      }
+    }
+
+    if (url.pathname === '/api/link-graph' && request.method === 'GET') {
+      try {
+        const graph = await fetchLinkGraph();
+        return json({
+          ok: true,
+          source: DEFAULT_GRAPH_URL,
+          generatedAt: graph.generatedAt || null,
+          pageCount: graph.pages.length,
+          edgeCount: graph.edges.length
+        }, { headers: corsHeaders });
+      } catch (error) {
+        return json({ ok: false, error: 'Unable to read CuratorOS Link Map', detail: error?.message || String(error) }, { status: 502, headers: corsHeaders });
+      }
+    }
+
+    if (url.pathname === '/api/discover' && (request.method === 'GET' || request.method === 'POST')) {
+      try {
+        let options = {};
+        if (request.method === 'POST') options = await request.json().catch(() => ({}));
+        const graph = await fetchLinkGraph();
+        const generated = generateLinkOpportunities(graph, options?.graph || options || {}).map(item => ({ ...item, generatedAutomatically: true }));
+        const opportunities = discoverOpportunities({ items: generated }, scoringConfig);
+        await attachWorkflow(env, opportunities);
+        return json({
+          generatedAt: new Date().toISOString(),
+          mode: 'automatic-link-map',
+          graph: {
+            source: DEFAULT_GRAPH_URL,
+            generatedAt: graph.generatedAt || null,
+            pages: graph.pages.length,
+            edges: graph.edges.length
+          },
+          summary: summarizeOpportunities(opportunities),
+          opportunities
+        }, { headers: corsHeaders });
+      } catch (error) {
+        return json({ ok: false, error: 'Automatic discovery failed', detail: error?.message || String(error) }, { status: 502, headers: corsHeaders });
       }
     }
 
@@ -86,30 +138,18 @@ export default {
         }
 
         const opportunities = discoverOpportunities(enrichedDataset, scoringConfig);
-
-        if (env.OPPORTUNITY_STATE) {
-          await Promise.all(opportunities.map(async item => {
-            const saved = await readWorkflow(env, item.id);
-            if (saved) {
-              item.workflowStatus = saved.workflowStatus || item.workflowStatus;
-              item.notes = saved.notes || '';
-              item.updatedAt = saved.updatedAt || null;
-            }
-          }));
-        }
+        await attachWorkflow(env, opportunities);
 
         return json({
           generatedAt: new Date().toISOString(),
+          mode: 'manual-analysis',
           summary: summarizeOpportunities(opportunities),
           siteKnowledge: enrichedDataset.siteKnowledge || null,
           inventoryUsed: Boolean(inventory),
           opportunities
         }, { headers: corsHeaders });
       } catch (error) {
-        return json({ ok: false, error: 'Invalid analysis payload', detail: error?.message || String(error) }, {
-          status: 400,
-          headers: corsHeaders
-        });
+        return json({ ok: false, error: 'Invalid analysis payload', detail: error?.message || String(error) }, { status: 400, headers: corsHeaders });
       }
     }
 
@@ -118,9 +158,7 @@ export default {
       const id = decodeURIComponent(workflowMatch[1]);
 
       if (request.method === 'GET') {
-        if (!env.OPPORTUNITY_STATE) {
-          return json({ ok: true, persistence: 'browser', record: null }, { headers: corsHeaders });
-        }
+        if (!env.OPPORTUNITY_STATE) return json({ ok: true, persistence: 'browser', record: null }, { headers: corsHeaders });
         return json({ ok: true, persistence: 'kv', record: await readWorkflow(env, id) }, { headers: corsHeaders });
       }
 
@@ -128,10 +166,7 @@ export default {
         try {
           const body = await request.json();
           const workflowStatus = String(body.workflowStatus || 'new');
-          if (!WORKFLOW_STATUSES.has(workflowStatus)) {
-            return json({ ok: false, error: 'Invalid workflow status' }, { status: 400, headers: corsHeaders });
-          }
-
+          if (!WORKFLOW_STATUSES.has(workflowStatus)) return json({ ok: false, error: 'Invalid workflow status' }, { status: 400, headers: corsHeaders });
           const record = {
             id,
             workflowStatus,
@@ -141,18 +176,12 @@ export default {
           const persisted = await writeWorkflow(env, id, record);
           return json({ ok: true, persistence: persisted ? 'kv' : 'browser', record }, { headers: corsHeaders });
         } catch (error) {
-          return json({ ok: false, error: 'Invalid workflow payload', detail: error?.message || String(error) }, {
-            status: 400,
-            headers: corsHeaders
-          });
+          return json({ ok: false, error: 'Invalid workflow payload', detail: error?.message || String(error) }, { status: 400, headers: corsHeaders });
         }
       }
     }
 
-    if (url.pathname.startsWith('/api/')) {
-      return json({ ok: false, error: 'Not found' }, { status: 404, headers: corsHeaders });
-    }
-
+    if (url.pathname.startsWith('/api/')) return json({ ok: false, error: 'Not found' }, { status: 404, headers: corsHeaders });
     return env.ASSETS.fetch(request);
   }
 };
