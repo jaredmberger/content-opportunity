@@ -18,16 +18,13 @@ let all = [];
 let activeType = 'all';
 let serverPersistence = 'browser';
 
-const esc = value => String(value ?? '').replace(/[&<>'\"]/g, char => ({
-  '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '\"': '&quot;'
+const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
 }[char]));
 
 function readLocalWorkflow() {
-  try {
-    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
-  } catch {
-    return {};
-  }
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); }
+  catch { return {}; }
 }
 
 function writeLocalWorkflow(map) {
@@ -83,7 +80,6 @@ function renderFilters() {
 function filteredRows(includeType = true) {
   const workflow = els.workflowFilter.value;
   const query = els.searchQueue.value.trim().toLowerCase();
-
   return all.filter(item => {
     if (includeType && activeType !== 'all' && item.type !== activeType) return false;
     if (workflow === 'active' && !ACTIVE_STATUSES.has(item.workflowStatus || 'new')) return false;
@@ -98,6 +94,17 @@ function filteredRows(includeType = true) {
 
 function workflowOptions(selected) {
   return WORKFLOW_STATUSES.map(status => `<option value="${status}" ${status === selected ? 'selected' : ''}>${status.replace('-', ' ')}</option>`).join('');
+}
+
+function siteEvidence(item) {
+  const rows = [];
+  if (item.inventoryResolved) {
+    rows.push(`<div class="evidence-item"><strong>Site inventory</strong>${item.siteInventoryMatch ? 'Existing canonical verified' : 'No canonical match found'}</div>`);
+  }
+  if (item.linkInspection?.checked) {
+    rows.push(`<div class="evidence-item"><strong>Live link inspection</strong>${esc(item.linkInspection.missingCount)} of ${esc(item.linkInspection.relatedCount)} related links missing</div>`);
+  }
+  return rows.join('');
 }
 
 function renderResults() {
@@ -115,24 +122,20 @@ function renderResults() {
           <span class="badge">${esc(item.priority)} priority</span>
           <span class="badge">${esc(item.cluster)}</span>
           <span class="badge workflow-badge">${esc((item.workflowStatus || 'new').replace('-', ' '))}</span>
+          ${item.siteInventoryMatch ? '<span class="badge">inventory verified</span>' : ''}
         </div>
         <h3>${esc(item.title)}</h3>
         <p class="recommendation">${esc(item.recommendation)}</p>
         ${item.canonicalUrl ? `<p class="url-line"><a href="${esc(item.canonicalUrl)}" target="_blank" rel="noopener">Open existing page ↗</a></p>` : ''}
         ${item.unresolvedQuestions?.length ? `<p><strong>Open questions:</strong> ${item.unresolvedQuestions.map(esc).join(' · ')}</p>` : ''}
-        <div class="evidence">${(item.evidence || []).slice(0, 5).map(e => `<div class="evidence-item"><strong>${esc(e.label)}</strong>+${esc(e.contribution)} points</div>`).join('')}</div>
+        <div class="evidence">${siteEvidence(item)}${(item.evidence || []).slice(0, 5).map(e => `<div class="evidence-item"><strong>${esc(e.label)}</strong>+${esc(e.contribution)} points</div>`).join('')}</div>
+        ${item.linkInspection?.missingUrls?.length ? `<details><summary>Missing link targets (${esc(item.linkInspection.missingUrls.length)})</summary><div class="missing-links">${item.linkInspection.missingUrls.map(url => `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(url)}</a>`).join('')}</div></details>` : ''}
       </div>
       <div class="score"><strong>${esc(item.score)}</strong><span>Opportunity score</span></div>
     </div>
     <div class="workflow-editor">
-      <div>
-        <label>Workflow status</label>
-        <select class="workflow-status">${workflowOptions(item.workflowStatus || 'new')}</select>
-      </div>
-      <div class="notes-wrap">
-        <label>Editorial notes</label>
-        <textarea class="workflow-notes" rows="2" placeholder="Why accept, defer, research further, or what to do next…">${esc(item.notes || '')}</textarea>
-      </div>
+      <div><label>Workflow status</label><select class="workflow-status">${workflowOptions(item.workflowStatus || 'new')}</select></div>
+      <div class="notes-wrap"><label>Editorial notes</label><textarea class="workflow-notes" rows="2" placeholder="Why accept, defer, research further, or what to do next…">${esc(item.notes || '')}</textarea></div>
       <button class="save-workflow secondary">Save</button>
     </div>
   </article>`).join('');
@@ -140,10 +143,7 @@ function renderResults() {
   els.results.querySelectorAll('.save-workflow').forEach(button => button.addEventListener('click', saveWorkflow));
 }
 
-function renderAll() {
-  renderSummary();
-  renderResults();
-}
+function renderAll() { renderSummary(); renderResults(); }
 
 async function saveWorkflow(event) {
   const card = event.currentTarget.closest('.opportunity');
@@ -153,56 +153,39 @@ async function saveWorkflow(event) {
   const button = event.currentTarget;
   button.disabled = true;
   button.textContent = 'Saving…';
-
   const record = { workflowStatus, notes, updatedAt: new Date().toISOString() };
 
   try {
     const response = await fetch(`/api/workflow/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(record)
+      method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(record)
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || 'Save failed');
-
-    if (data.persistence === 'kv') {
-      serverPersistence = 'kv';
-    } else {
-      const workflow = readLocalWorkflow();
-      workflow[id] = record;
-      writeLocalWorkflow(workflow);
-    }
-
+    if (data.persistence === 'kv') serverPersistence = 'kv';
+    else { const workflow = readLocalWorkflow(); workflow[id] = record; writeLocalWorkflow(workflow); }
     const index = all.findIndex(item => item.id === id);
     if (index >= 0) all[index] = { ...all[index], ...(data.record || record) };
-
     els.persistence.textContent = serverPersistence === 'kv' ? 'Workflow storage · Cloudflare KV' : 'Workflow storage · this browser';
     button.textContent = data.persistence === 'kv' ? 'Saved to KV' : 'Saved locally';
     setTimeout(() => { button.textContent = 'Save'; }, 1000);
     renderAll();
   } catch {
-    const workflow = readLocalWorkflow();
-    workflow[id] = record;
-    writeLocalWorkflow(workflow);
+    const workflow = readLocalWorkflow(); workflow[id] = record; writeLocalWorkflow(workflow);
     const index = all.findIndex(item => item.id === id);
     if (index >= 0) all[index] = { ...all[index], ...record };
     button.textContent = 'Saved locally';
     setTimeout(() => { button.textContent = 'Save'; }, 1200);
     renderAll();
-  } finally {
-    button.disabled = false;
-  }
+  } finally { button.disabled = false; }
 }
 
 async function analyze() {
   els.analyze.disabled = true;
-  els.analyze.textContent = 'Analyzing…';
+  els.analyze.textContent = 'Analyzing site + opportunities…';
   try {
     const payload = JSON.parse(els.dataset.value || '{}');
     const response = await fetch('/api/analyze', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload)
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload)
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || data.error || 'Analysis failed');
