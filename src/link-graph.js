@@ -1,5 +1,4 @@
-const DEFAULT_GRAPH_URL = 'https://curator.oceanliners.net/api/link-map';
-const FALLBACK_GRAPH_URL = 'https://curator.oceanliners.net/link-map/link-map-data.json';
+const DEFAULT_GRAPH_URL = 'https://curator.oceanliners.net/link-map/link-map-data.json';
 
 function pageType(url) {
   const path = new URL(url).pathname.toLowerCase();
@@ -15,9 +14,7 @@ function labelFor(page) {
   try {
     const part = new URL(page.url).pathname.split('/').filter(Boolean).pop() || 'Ocean Liner Curator';
     return decodeURIComponent(part).replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-  } catch {
-    return page?.url || 'Untitled page';
-  }
+  } catch { return page?.url || 'Untitled page'; }
 }
 
 function slugify(value = '') {
@@ -36,35 +33,19 @@ function normalizeGraphPayload(payload, source) {
 }
 
 export async function fetchLinkGraph(graphUrl = DEFAULT_GRAPH_URL) {
-  const candidates = [...new Set([graphUrl, DEFAULT_GRAPH_URL, FALLBACK_GRAPH_URL].filter(Boolean))];
-  const failures = [];
-
-  for (const endpoint of candidates) {
-    try {
-      const response = await fetch(endpoint, {
-        headers: {
-          accept: 'application/json',
-          'user-agent': 'CuratorOS-Content-Opportunity/0.8.1 (+https://content.oceanliners.net)'
-        },
-        cf: { cacheTtl: 300, cacheEverything: true }
-      });
-      if (!response.ok) {
-        failures.push(`${new URL(endpoint).pathname}: HTTP ${response.status}`);
-        continue;
-      }
-      const payload = await response.json();
-      const graph = normalizeGraphPayload(payload, endpoint);
-      if (!graph) {
-        failures.push(`${new URL(endpoint).pathname}: missing pages/edges`);
-        continue;
-      }
-      return graph;
-    } catch (error) {
-      failures.push(`${new URL(endpoint).pathname}: ${error?.message || String(error)}`);
-    }
-  }
-
-  throw new Error(`No usable Link Map source found (${failures.join('; ')})`);
+  const endpoint = graphUrl || DEFAULT_GRAPH_URL;
+  const response = await fetch(endpoint, {
+    headers: {
+      accept: 'application/json',
+      'user-agent': 'CuratorOS-Content-Opportunity/0.8.2 (+https://content.oceanliners.net)'
+    },
+    cf: { cacheTtl: 300, cacheEverything: true }
+  });
+  if (!response.ok) throw new Error(`Link Map dataset returned HTTP ${response.status}`);
+  const payload = await response.json();
+  const graph = normalizeGraphPayload(payload, endpoint);
+  if (!graph) throw new Error('Link Map dataset is missing pages or edges.');
+  return graph;
 }
 
 export function generateLinkOpportunities(graph, options = {}) {
@@ -90,66 +71,38 @@ export function generateLinkOpportunities(graph, options = {}) {
     const neighbors = neighborsFor(page.url);
     const direct = new Set([...neighbors, page.url]);
     const possible = [];
-
     for (const other of byUrl.values()) {
       if (other.url === page.url || other.type !== page.type || direct.has(other.url)) continue;
       const otherNeighbors = neighborsFor(other.url);
       let shared = 0;
       for (const neighbor of otherNeighbors) if (neighbors.has(neighbor)) shared += 1;
       if (shared < minSharedNeighbors) continue;
-      possible.push({
-        url: other.url,
-        title: labelFor(other),
-        sharedNeighbors: shared,
-        totalLinks: otherNeighbors.size
-      });
+      possible.push({ url: other.url, title: labelFor(other), sharedNeighbors: shared, totalLinks: otherNeighbors.size });
     }
-
     possible.sort((a, b) => b.sharedNeighbors - a.sharedNeighbors || b.totalLinks - a.totalLinks || a.title.localeCompare(b.title));
     const suggestions = possible.slice(0, maxSuggestionsPerPage);
     if (!suggestions.length) continue;
-
     const inbound = incoming.get(page.url)?.size || 0;
     const outbound = outgoing.get(page.url)?.size || 0;
     const total = neighbors.size;
     const editorialImportance = inbound === 0 ? 10 : inbound <= 2 ? 8 : inbound <= 5 ? 6 : 4;
     const sharedStrength = suggestions.reduce((sum, item) => sum + item.sharedNeighbors, 0);
-
     candidates.push({
       id: `link-map-${slugify(new URL(page.url).pathname || page.url)}`,
-      title: labelFor(page),
-      contentType: 'internal-link task',
-      cluster: `Link Map · ${page.type}`,
-      canonicalUrl: page.url,
-      opportunityType: 'connect',
-      entityMentions: 0,
-      potentialLinks: suggestions.length,
-      missingLinks: suggestions.length,
-      clusterGap: false,
-      clusterDepth: total,
-      searchImpressions: 0,
-      averagePosition: 0,
-      editorialImportance,
-      unresolvedQuestions: [],
-      relatedUrls: suggestions.map(item => item.url),
-      sources: ['curatoros-link-map'],
-      graphEvidence: {
-        incomingLinks: inbound,
-        outgoingLinks: outbound,
-        totalNeighbors: total,
-        sharedNeighborStrength: sharedStrength,
-        suggestions
-      }
+      title: labelFor(page), contentType: 'internal-link task', cluster: `Link Map · ${page.type}`,
+      canonicalUrl: page.url, opportunityType: 'connect', entityMentions: 0,
+      potentialLinks: suggestions.length, missingLinks: suggestions.length, clusterGap: false,
+      clusterDepth: total, searchImpressions: 0, averagePosition: 0, editorialImportance,
+      unresolvedQuestions: [], relatedUrls: suggestions.map(item => item.url), sources: ['curatoros-link-map'],
+      graphEvidence: { incomingLinks: inbound, outgoingLinks: outbound, totalNeighbors: total, sharedNeighborStrength: sharedStrength, suggestions }
     });
   }
 
-  return candidates
-    .sort((a, b) => {
-      const aWeak = a.graphEvidence.incomingLinks;
-      const bWeak = b.graphEvidence.incomingLinks;
-      return aWeak - bWeak || b.graphEvidence.sharedNeighborStrength - a.graphEvidence.sharedNeighborStrength || b.missingLinks - a.missingLinks || a.title.localeCompare(b.title);
-    })
-    .slice(0, maxOpportunities);
+  return candidates.sort((a, b) =>
+    a.graphEvidence.incomingLinks - b.graphEvidence.incomingLinks ||
+    b.graphEvidence.sharedNeighborStrength - a.graphEvidence.sharedNeighborStrength ||
+    b.missingLinks - a.missingLinks || a.title.localeCompare(b.title)
+  ).slice(0, maxOpportunities);
 }
 
-export { DEFAULT_GRAPH_URL, FALLBACK_GRAPH_URL };
+export { DEFAULT_GRAPH_URL };
