@@ -22,7 +22,7 @@ const workflowKey = id => `content-opportunity:workflow:${id}`;
 const SEARCH_INTELLIGENCE_KEY = 'content-opportunity:search-intelligence:v1';
 const PROJECT_RECORDS_KEY = 'content-opportunity:project-records:v1';
 const DISCOVERY_SNAPSHOT_KEY = 'content-opportunity:discovery-snapshot:v1';
-const DEFAULT_SEARCH_INTELLIGENCE_URL = 'https://search-intelligence.oceanliners.net/api/search-intelligence';
+const DEFAULT_SEARCH_INTELLIGENCE_URL = 'https://search-intelligence.oceanliners.net/api/curator-intelligence';
 
 async function readKvJson(env, key) {
   if (!env.OPPORTUNITY_STATE) return null;
@@ -60,11 +60,15 @@ function asSearchSnapshot(payload, source) {
 async function fetchLiveSearchIntelligence(env) {
   const endpoint = env.SEARCH_INTELLIGENCE_URL || DEFAULT_SEARCH_INTELLIGENCE_URL;
   const response = await fetch(endpoint, {
-    headers: { accept: 'application/json', 'user-agent': 'CuratorOS-Content-Opportunity/0.8.2 (+https://content.oceanliners.net)' },
+    headers: { accept: 'application/json', 'user-agent': 'CuratorOS-Content-Opportunity/0.8.3 (+https://content.oceanliners.net)' },
     cf: { cacheTtl: 120, cacheEverything: true }
   });
   if (!response.ok) throw new Error(`Search Intelligence returned HTTP ${response.status}`);
-  const snapshot = asSearchSnapshot(await response.json(), endpoint);
+  const text = await response.text();
+  let payload;
+  try { payload = JSON.parse(text); }
+  catch { throw new Error(`Search Intelligence returned non-JSON: ${text.slice(0,80)}`); }
+  const snapshot = asSearchSnapshot(payload, endpoint);
   if (!snapshot?.pageCount) throw new Error('Search Intelligence returned no usable page metrics.');
   return { snapshot, endpoint };
 }
@@ -151,7 +155,7 @@ async function safeSource(name, fn) {
 
 function sourceDiagnostics({ graphResult, inventoryResult, searchResolved, projectResolved }) {
   return {
-    linkMap: { ok:graphResult.ok, mode:graphResult.ok?'static-dataset':'unavailable', source:DEFAULT_GRAPH_URL, error:graphResult.error },
+    linkMap: { ok:graphResult.ok, mode:graphResult.ok?'live-api':'unavailable', source:DEFAULT_GRAPH_URL, error:graphResult.error },
     siteInventory: { ok:inventoryResult.ok, mode:inventoryResult.ok?'live-index':'unavailable', source:inventoryResult.value?.source || null, error:inventoryResult.error },
     searchIntelligence: { ok:Boolean(searchResolved.snapshot), mode:searchResolved.mode, source:searchResolved.endpoint, error:searchResolved.liveError || null },
     projectRecords: { ok:Boolean(projectResolved.snapshot), mode:projectResolved.mode, source:projectResolved.endpoint, error:projectResolved.liveError || null }
@@ -168,7 +172,7 @@ export default {
       const [searchSnapshot, projectSnapshot, discoverySnapshot] = await Promise.all([
         readSearchIntelligence(env).catch(()=>null), readProjectRecords(env).catch(()=>null), readDiscoverySnapshot(env).catch(()=>null)
       ]);
-      return json({ ok:true, service:env.APP_NAME || 'CuratorOS Content Opportunity Finder', version:'0.8.2', siteOrigin,
+      return json({ ok:true, service:env.APP_NAME || 'CuratorOS Content Opportunity Finder', version:'0.8.3', siteOrigin,
         scoringVersion:scoringConfig.version, workflowPersistence:env.OPPORTUNITY_STATE?'kv':'browser',
         siteInventory:'live-index', automaticSiteEnrichment:true, linkGapInspection:true, automaticGraphDiscovery:true,
         automaticEntityDiscovery:true, lifecycleReconciliation:Boolean(env.OPPORTUNITY_STATE), lastDiscoveryAt:discoverySnapshot?.generatedAt || null,
