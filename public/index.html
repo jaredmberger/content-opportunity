@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#0a1110" />
+  <title>Content Opportunity Finder — CuratorOS</title>
+  <meta name="description" content="Explainable editorial opportunity discovery for Ocean Liner Curator." />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">CuratorOS · Editorial Intelligence</p>
+        <h1>Content Opportunity Finder</h1>
+        <p class="lede">Find what oceanliners.net should create, expand, connect, or research — and show the evidence behind every recommendation.</p>
+      </div>
+      <div class="status" id="status">Checking engine…</div>
+    </header>
+
+    <section class="toolbar panel">
+      <div>
+        <label for="dataset">Analysis dataset</label>
+        <textarea id="dataset" spellcheck="false" aria-describedby="datasetHelp"></textarea>
+        <p id="datasetHelp" class="hint">Paste CuratorOS inventory/link/search JSON here, or load the built-in demonstration dataset.</p>
+      </div>
+      <div class="actions">
+        <button id="loadSample" class="secondary">Load sample</button>
+        <button id="analyze">Analyze opportunities</button>
+      </div>
+    </section>
+
+    <section id="summary" class="summary-grid" aria-live="polite"></section>
+
+    <section class="results-head">
+      <div>
+        <p class="eyebrow">Opportunity Queue</p>
+        <h2>Recommended editorial actions</h2>
+      </div>
+      <div class="filters" id="filters"></div>
+    </section>
+
+    <section id="results" class="results" aria-live="polite">
+      <div class="empty panel">Load the sample dataset or paste CuratorOS data to begin.</div>
+    </section>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
