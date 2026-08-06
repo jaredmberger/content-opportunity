@@ -1,0 +1,72 @@
+{
+  "items": [
+    {
+      "id": "rms-carmania",
+      "title": "RMS Carmania",
+      "contentType": "ship guide",
+      "cluster": "Cunard · Edwardian Liners",
+      "canonicalUrl": null,
+      "entityMentions": 11,
+      "potentialLinks": 7,
+      "missingLinks": 7,
+      "clusterGap": true,
+      "clusterDepth": 10,
+      "searchImpressions": 620,
+      "averagePosition": 12.4,
+      "editorialImportance": 9,
+      "unresolvedQuestions": [],
+      "sources": ["site-index", "link-graph", "search-intelligence"]
+    },
+    {
+      "id": "blue-riband",
+      "title": "What Was the Blue Riband?",
+      "contentType": "quick answer",
+      "cluster": "Atlantic Speed",
+      "canonicalUrl": "https://www.oceanliners.net/what-was-the-blue-riband",
+      "entityMentions": 9,
+      "potentialLinks": 8,
+      "missingLinks": 4,
+      "clusterGap": false,
+      "clusterDepth": 12,
+      "searchImpressions": 980,
+      "averagePosition": 8.1,
+      "editorialImportance": 8,
+      "unresolvedQuestions": [],
+      "sources": ["site-index", "link-graph", "search-intelligence"]
+    },
+    {
+      "id": "cabin-class-evidence",
+      "title": "Cabin-class liner transition evidence",
+      "contentType": "research note",
+      "cluster": "Interwar Service Models",
+      "canonicalUrl": null,
+      "entityMentions": 6,
+      "potentialLinks": 5,
+      "missingLinks": 5,
+      "clusterGap": true,
+      "clusterDepth": 7,
+      "searchImpressions": 140,
+      "averagePosition": 31,
+      "editorialImportance": 10,
+      "unresolvedQuestions": ["Which lines adopted cabin-class branding first?", "Which primary sources best support the chronology?"],
+      "sources": ["entity-registry", "research-records"]
+    },
+    {
+      "id": "olympic-titanic-links",
+      "title": "Olympic ↔ Titanic supporting links",
+      "contentType": "internal-link task",
+      "cluster": "Olympic Class",
+      "canonicalUrl": "https://www.oceanliners.net/ships/rms-olympic",
+      "entityMentions": 12,
+      "potentialLinks": 10,
+      "missingLinks": 6,
+      "clusterGap": false,
+      "clusterDepth": 12,
+      "searchImpressions": 410,
+      "averagePosition": 6.3,
+      "editorialImportance": 8,
+      "unresolvedQuestions": [],
+      "sources": ["link-graph", "site-index"]
+    }
+  ]
+}
