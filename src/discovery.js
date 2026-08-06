@@ -44,7 +44,9 @@ export function discoverOpportunities(dataset, config) {
         averagePosition: Number(item.averagePosition || 0),
         editorialImportance: Number(item.editorialImportance || 0),
         unresolvedQuestions: Array.isArray(item.unresolvedQuestions) ? item.unresolvedQuestions : [],
-        sources: Array.isArray(item.sources) ? item.sources : []
+        sources: Array.isArray(item.sources) ? item.sources : [],
+        workflowStatus: item.workflowStatus || 'new',
+        notes: item.notes || ''
       };
 
       const scored = scoreOpportunity(base, config);
@@ -59,7 +61,17 @@ export function discoverOpportunities(dataset, config) {
 }
 
 export function summarizeOpportunities(opportunities) {
-  const summary = { total: opportunities.length, high: 0, medium: 0, low: 0, create: 0, expand: 0, connect: 0, research: 0 };
+  const summary = {
+    total: opportunities.length,
+    high: 0,
+    medium: 0,
+    low: 0,
+    create: 0,
+    expand: 0,
+    connect: 0,
+    research: 0
+  };
+
   for (const item of opportunities) {
     summary[item.priority] = (summary[item.priority] || 0) + 1;
     summary[item.type] = (summary[item.type] || 0) + 1;
