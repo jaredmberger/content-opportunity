@@ -1,13 +1,13 @@
 {
   "name": "content-opportunity",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "private": true,
   "description": "CuratorOS Content Opportunity Finder — explainable editorial opportunity discovery for oceanliners.net.",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "check": "node --check worker.js && node --check public/app.js && node --check src/scoring.js && node --check src/discovery.js && node --check src/prioritization.js && node --check src/reconciliation.js && node --check src/link-graph.js && node --check src/site-inventory.js && node --check src/project-records.js && node --check src/search-intelligence.js",
+    "check": "node --check worker.js && node --check public/app.js && node --check public/work-next-ui.js && node --check src/scoring.js && node --check src/discovery.js && node --check src/prioritization.js && node --check src/reconciliation.js && node --check src/link-graph.js && node --check src/site-inventory.js && node --check src/project-records.js && node --check src/search-intelligence.js",
     "test": "node --test"
   },
   "devDependencies": {
