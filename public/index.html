@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <meta name="theme-color" content="#0a1110" />
   <title>Content Opportunity Finder — CuratorOS</title>
-  <meta name="description" content="Explainable editorial opportunity discovery for Ocean Liner Curator." />
+  <meta name="description" content="Explainable editorial opportunity discovery and workflow management for Ocean Liner Curator." />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
@@ -14,9 +14,12 @@
       <div>
         <p class="eyebrow">CuratorOS · Editorial Intelligence</p>
         <h1>Content Opportunity Finder</h1>
-        <p class="lede">Find what oceanliners.net should create, expand, connect, or research — and show the evidence behind every recommendation.</p>
+        <p class="lede">Find what oceanliners.net should create, expand, connect, or research — then review, accept, defer, and complete those opportunities from one queue.</p>
       </div>
-      <div class="status" id="status">Checking engine…</div>
+      <div class="status-stack">
+        <div class="status" id="status">Checking engine…</div>
+        <div class="status muted" id="persistence">Checking storage…</div>
+      </div>
     </header>
 
     <section class="toolbar panel">
@@ -32,6 +35,27 @@
     </section>
 
     <section id="summary" class="summary-grid" aria-live="polite"></section>
+
+    <section class="queue-tools panel">
+      <div>
+        <label for="searchQueue">Search queue</label>
+        <input id="searchQueue" type="search" placeholder="Ship, cluster, recommendation…" />
+      </div>
+      <div>
+        <label for="workflowFilter">Workflow</label>
+        <select id="workflowFilter">
+          <option value="active">Active work</option>
+          <option value="all">All statuses</option>
+          <option value="new">New</option>
+          <option value="reviewed">Reviewed</option>
+          <option value="accepted">Accepted</option>
+          <option value="in-progress">In progress</option>
+          <option value="completed">Completed</option>
+          <option value="deferred">Deferred</option>
+          <option value="dismissed">Dismissed</option>
+        </select>
+      </div>
+    </section>
 
     <section class="results-head">
       <div>
