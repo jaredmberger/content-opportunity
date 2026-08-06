@@ -4,6 +4,7 @@ import { fetchSiteInventory } from './src/site-inventory.js';
 import { enrichWithSiteKnowledge } from './src/site-enrichment.js';
 import { fetchLinkGraph, generateLinkOpportunities, DEFAULT_GRAPH_URL } from './src/link-graph.js';
 import { normalizeSearchIntelligence, enrichItemsWithSearchIntelligence } from './src/search-intelligence.js';
+import { fetchProjectRecords, normalizeProjectRecords, generateEntityOpportunities, DEFAULT_PROJECT_RECORDS_URL } from './src/project-records.js';
 
 const json = (data, init = {}) => new Response(JSON.stringify(data, null, 2), {
   ...init,
@@ -23,6 +24,7 @@ const corsHeaders = {
 const WORKFLOW_STATUSES = new Set(['new', 'reviewed', 'accepted', 'in-progress', 'completed', 'deferred', 'dismissed']);
 const workflowKey = id => `content-opportunity:workflow:${id}`;
 const SEARCH_INTELLIGENCE_KEY = 'content-opportunity:search-intelligence:v1';
+const PROJECT_RECORDS_KEY = 'content-opportunity:project-records:v1';
 const DEFAULT_SEARCH_INTELLIGENCE_URL = 'https://search-intelligence.oceanliners.net/api/search-intelligence';
 
 async function readWorkflow(env, id) {
@@ -36,16 +38,21 @@ async function writeWorkflow(env, id, value) {
   return true;
 }
 
-async function readSearchIntelligence(env) {
+async function readKvJson(env, key) {
   if (!env.OPPORTUNITY_STATE) return null;
-  return env.OPPORTUNITY_STATE.get(SEARCH_INTELLIGENCE_KEY, { type: 'json' });
+  return env.OPPORTUNITY_STATE.get(key, { type: 'json' });
 }
 
-async function writeSearchIntelligence(env, snapshot) {
+async function writeKvJson(env, key, value) {
   if (!env.OPPORTUNITY_STATE) return false;
-  await env.OPPORTUNITY_STATE.put(SEARCH_INTELLIGENCE_KEY, JSON.stringify(snapshot));
+  await env.OPPORTUNITY_STATE.put(key, JSON.stringify(value));
   return true;
 }
+
+const readSearchIntelligence = env => readKvJson(env, SEARCH_INTELLIGENCE_KEY);
+const writeSearchIntelligence = (env, snapshot) => writeKvJson(env, SEARCH_INTELLIGENCE_KEY, snapshot);
+const readProjectRecords = env => readKvJson(env, PROJECT_RECORDS_KEY);
+const writeProjectRecords = (env, snapshot) => writeKvJson(env, PROJECT_RECORDS_KEY, snapshot);
 
 function asSearchSnapshot(payload, source) {
   const candidate = payload?.snapshot || payload;
@@ -67,10 +74,7 @@ function asSearchSnapshot(payload, source) {
 async function fetchLiveSearchIntelligence(env) {
   const endpoint = env.SEARCH_INTELLIGENCE_URL || DEFAULT_SEARCH_INTELLIGENCE_URL;
   const response = await fetch(endpoint, {
-    headers: {
-      accept: 'application/json',
-      'user-agent': 'CuratorOS-Content-Opportunity/0.6 (+https://content.oceanliners.net)'
-    },
+    headers: { accept: 'application/json', 'user-agent': 'CuratorOS-Content-Opportunity/0.7 (+https://content.oceanliners.net)' },
     cf: { cacheTtl: 120, cacheEverything: true }
   });
   if (!response.ok) throw new Error(`Search Intelligence returned HTTP ${response.status}`);
@@ -81,6 +85,7 @@ async function fetchLiveSearchIntelligence(env) {
 }
 
 async function resolveSearchIntelligence(env, { preferLive = true } = {}) {
+  const endpoint = env.SEARCH_INTELLIGENCE_URL || DEFAULT_SEARCH_INTELLIGENCE_URL;
   if (preferLive) {
     try {
       const live = await fetchLiveSearchIntelligence(env);
@@ -88,12 +93,30 @@ async function resolveSearchIntelligence(env, { preferLive = true } = {}) {
       return { snapshot: live.snapshot, mode: 'live', endpoint: live.endpoint, fallback: false };
     } catch (error) {
       const saved = await readSearchIntelligence(env).catch(() => null);
-      if (saved) return { snapshot: saved, mode: 'kv-fallback', endpoint: env.SEARCH_INTELLIGENCE_URL || DEFAULT_SEARCH_INTELLIGENCE_URL, fallback: true, liveError: error?.message || String(error) };
-      return { snapshot: null, mode: 'unavailable', endpoint: env.SEARCH_INTELLIGENCE_URL || DEFAULT_SEARCH_INTELLIGENCE_URL, fallback: false, liveError: error?.message || String(error) };
+      if (saved) return { snapshot: saved, mode: 'kv-fallback', endpoint, fallback: true, liveError: error?.message || String(error) };
+      return { snapshot: null, mode: 'unavailable', endpoint, fallback: false, liveError: error?.message || String(error) };
     }
   }
   const saved = await readSearchIntelligence(env).catch(() => null);
-  return { snapshot: saved, mode: saved ? 'kv' : 'unavailable', endpoint: env.SEARCH_INTELLIGENCE_URL || DEFAULT_SEARCH_INTELLIGENCE_URL, fallback: false };
+  return { snapshot: saved, mode: saved ? 'kv' : 'unavailable', endpoint, fallback: false };
+}
+
+async function resolveProjectRecords(env, { preferLive = true } = {}) {
+  const endpoint = env.PROJECT_RECORDS_URL || DEFAULT_PROJECT_RECORDS_URL;
+  if (preferLive) {
+    try {
+      const payload = await fetchProjectRecords(endpoint);
+      const snapshot = normalizeProjectRecords(payload, endpoint);
+      await writeProjectRecords(env, snapshot).catch(() => false);
+      return { snapshot, mode: 'live', endpoint, fallback: false };
+    } catch (error) {
+      const saved = await readProjectRecords(env).catch(() => null);
+      if (saved) return { snapshot: saved, mode: 'kv-fallback', endpoint, fallback: true, liveError: error?.message || String(error) };
+      return { snapshot: null, mode: 'unavailable', endpoint, fallback: false, liveError: error?.message || String(error) };
+    }
+  }
+  const saved = await readProjectRecords(env).catch(() => null);
+  return { snapshot: saved, mode: saved ? 'kv' : 'unavailable', endpoint, fallback: false };
 }
 
 async function attachWorkflow(env, opportunities) {
@@ -116,11 +139,14 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
 
     if (url.pathname === '/api/health') {
-      const searchSnapshot = await readSearchIntelligence(env).catch(() => null);
+      const [searchSnapshot, projectSnapshot] = await Promise.all([
+        readSearchIntelligence(env).catch(() => null),
+        readProjectRecords(env).catch(() => null)
+      ]);
       return json({
         ok: true,
         service: env.APP_NAME || 'CuratorOS Content Opportunity Finder',
-        version: '0.6.0',
+        version: '0.7.0',
         siteOrigin,
         scoringVersion: scoringConfig.version,
         workflowPersistence: env.OPPORTUNITY_STATE ? 'kv' : 'browser',
@@ -128,15 +154,12 @@ export default {
         automaticSiteEnrichment: true,
         linkGapInspection: true,
         automaticGraphDiscovery: true,
+        automaticEntityDiscovery: true,
         linkMapSource: DEFAULT_GRAPH_URL,
         searchIntelligenceEndpoint: env.SEARCH_INTELLIGENCE_URL || DEFAULT_SEARCH_INTELLIGENCE_URL,
-        searchIntelligenceFallback: searchSnapshot ? {
-          available: true,
-          importedAt: searchSnapshot.importedAt || null,
-          pageCount: searchSnapshot.pageCount || 0,
-          rowCount: searchSnapshot.rowCount || 0,
-          source: searchSnapshot.source || null
-        } : { available: false }
+        projectRecordsEndpoint: env.PROJECT_RECORDS_URL || DEFAULT_PROJECT_RECORDS_URL,
+        searchIntelligenceFallback: searchSnapshot ? { available: true, importedAt: searchSnapshot.importedAt || null, pageCount: searchSnapshot.pageCount || 0 } : { available: false },
+        projectRecordsFallback: projectSnapshot ? { available: true, importedAt: projectSnapshot.importedAt || null, recordCount: projectSnapshot.recordCount || 0, version: projectSnapshot.version || 0 } : { available: false }
       }, { headers: corsHeaders });
     }
 
@@ -165,17 +188,8 @@ export default {
     if (url.pathname === '/api/search-intelligence') {
       if (request.method === 'GET') {
         const resolved = await resolveSearchIntelligence(env, { preferLive: url.searchParams.get('live') !== '0' });
-        return json({
-          ok: true,
-          connected: Boolean(resolved.snapshot),
-          mode: resolved.mode,
-          endpoint: resolved.endpoint,
-          fallback: resolved.fallback,
-          liveError: resolved.liveError || null,
-          snapshot: resolved.snapshot
-        }, { headers: corsHeaders });
+        return json({ ok: true, connected: Boolean(resolved.snapshot), ...resolved }, { headers: corsHeaders });
       }
-
       if (request.method === 'POST' || request.method === 'PUT') {
         try {
           const body = await request.json();
@@ -190,33 +204,57 @@ export default {
       }
     }
 
+    if (url.pathname === '/api/project-records') {
+      if (request.method === 'GET') {
+        const resolved = await resolveProjectRecords(env, { preferLive: url.searchParams.get('live') !== '0' });
+        return json({ ok: true, connected: Boolean(resolved.snapshot), ...resolved }, { headers: corsHeaders });
+      }
+      if (request.method === 'POST' || request.method === 'PUT') {
+        try {
+          const body = await request.json();
+          const snapshot = normalizeProjectRecords(body, 'manual-import');
+          if (!snapshot.recordCount) return json({ ok: false, error: 'No Project Records were found.' }, { status: 400, headers: corsHeaders });
+          const persisted = await writeProjectRecords(env, snapshot);
+          if (!persisted) return json({ ok: false, error: 'OPPORTUNITY_STATE is required to save Project Records.' }, { status: 503, headers: corsHeaders });
+          return json({ ok: true, persistence: 'kv', snapshot: { importedAt: snapshot.importedAt, recordCount: snapshot.recordCount, version: snapshot.version } }, { headers: corsHeaders });
+        } catch (error) {
+          return json({ ok: false, error: 'Invalid Project Records payload', detail: error?.message || String(error) }, { status: 400, headers: corsHeaders });
+        }
+      }
+    }
+
     if (url.pathname === '/api/discover' && (request.method === 'GET' || request.method === 'POST')) {
       try {
         let options = {};
         if (request.method === 'POST') options = await request.json().catch(() => ({}));
-        const [graph, searchResolved] = await Promise.all([
+        const [graph, searchResolved, projectResolved, inventory] = await Promise.all([
           fetchLinkGraph(),
-          resolveSearchIntelligence(env, { preferLive: options?.searchIntelligence?.preferLive !== false })
+          resolveSearchIntelligence(env, { preferLive: options?.searchIntelligence?.preferLive !== false }),
+          resolveProjectRecords(env, { preferLive: options?.projectRecords?.preferLive !== false }),
+          fetchSiteInventory(siteOrigin)
         ]);
-        let generated = generateLinkOpportunities(graph, options?.graph || options || {}).map(item => ({ ...item, generatedAutomatically: true }));
+
+        let generated = generateLinkOpportunities(graph, options?.graph || {}).map(item => ({ ...item, generatedAutomatically: true }));
+        if (projectResolved.snapshot) {
+          generated.push(...generateEntityOpportunities(projectResolved.snapshot, inventory, options?.projectRecords || {}));
+        }
         if (searchResolved.snapshot) generated = enrichItemsWithSearchIntelligence(generated, searchResolved.snapshot);
+
         const opportunities = discoverOpportunities({ items: generated }, scoringConfig);
         await attachWorkflow(env, opportunities);
         return json({
           generatedAt: new Date().toISOString(),
-          mode: searchResolved.snapshot ? 'automatic-link-map-search-intelligence' : 'automatic-link-map',
+          mode: projectResolved.snapshot ? 'automatic-full-intelligence' : searchResolved.snapshot ? 'automatic-link-map-search-intelligence' : 'automatic-link-map',
           graph: { source: DEFAULT_GRAPH_URL, generatedAt: graph.generatedAt || null, pages: graph.pages.length, edges: graph.edges.length },
           searchIntelligence: {
-            used: Boolean(searchResolved.snapshot),
-            mode: searchResolved.mode,
-            endpoint: searchResolved.endpoint,
-            fallback: searchResolved.fallback,
-            liveError: searchResolved.liveError || null,
-            importedAt: searchResolved.snapshot?.importedAt || null,
-            source: searchResolved.snapshot?.source || null,
-            pages: searchResolved.snapshot?.pageCount || 0,
-            rows: searchResolved.snapshot?.rowCount || 0,
+            used: Boolean(searchResolved.snapshot), mode: searchResolved.mode, endpoint: searchResolved.endpoint, fallback: searchResolved.fallback,
+            liveError: searchResolved.liveError || null, pages: searchResolved.snapshot?.pageCount || 0,
             matchedOpportunities: opportunities.filter(item => item.searchIntelligenceMatch).length
+          },
+          projectRecords: {
+            used: Boolean(projectResolved.snapshot), mode: projectResolved.mode, endpoint: projectResolved.endpoint, fallback: projectResolved.fallback,
+            liveError: projectResolved.liveError || null, records: projectResolved.snapshot?.recordCount || 0, version: projectResolved.snapshot?.version || 0,
+            generatedOpportunities: opportunities.filter(item => item.projectRecordEvidence).length
           },
           summary: summarizeOpportunities(opportunities),
           opportunities
@@ -231,12 +269,10 @@ export default {
         const dataset = await request.json();
         let enrichedDataset = dataset;
         let inventory = null;
-
         if (dataset?.options?.useSiteInventory !== false) {
           inventory = await fetchSiteInventory(siteOrigin);
           enrichedDataset = await enrichWithSiteKnowledge(dataset, inventory, siteOrigin);
         }
-
         let items = Array.isArray(enrichedDataset?.items) ? enrichedDataset.items : [];
         let searchSnapshot = null;
         let searchMode = 'none';
@@ -249,20 +285,9 @@ export default {
           searchMode = resolved.mode;
         }
         if (searchSnapshot) items = enrichItemsWithSearchIntelligence(items, searchSnapshot);
-
         const opportunities = discoverOpportunities({ ...enrichedDataset, items }, scoringConfig);
         await attachWorkflow(env, opportunities);
-
-        return json({
-          generatedAt: new Date().toISOString(),
-          mode: 'manual-analysis',
-          summary: summarizeOpportunities(opportunities),
-          siteKnowledge: enrichedDataset.siteKnowledge || null,
-          inventoryUsed: Boolean(inventory),
-          searchIntelligenceUsed: Boolean(searchSnapshot),
-          searchIntelligenceMode: searchMode,
-          opportunities
-        }, { headers: corsHeaders });
+        return json({ generatedAt: new Date().toISOString(), mode: 'manual-analysis', summary: summarizeOpportunities(opportunities), siteKnowledge: enrichedDataset.siteKnowledge || null, inventoryUsed: Boolean(inventory), searchIntelligenceUsed: Boolean(searchSnapshot), searchIntelligenceMode: searchMode, opportunities }, { headers: corsHeaders });
       } catch (error) {
         return json({ ok: false, error: 'Invalid analysis payload', detail: error?.message || String(error) }, { status: 400, headers: corsHeaders });
       }
@@ -271,12 +296,10 @@ export default {
     const workflowMatch = url.pathname.match(/^\/api\/workflow\/([^/]+)$/);
     if (workflowMatch) {
       const id = decodeURIComponent(workflowMatch[1]);
-
       if (request.method === 'GET') {
         if (!env.OPPORTUNITY_STATE) return json({ ok: true, persistence: 'browser', record: null }, { headers: corsHeaders });
         return json({ ok: true, persistence: 'kv', record: await readWorkflow(env, id) }, { headers: corsHeaders });
       }
-
       if (request.method === 'PUT') {
         try {
           const body = await request.json();
