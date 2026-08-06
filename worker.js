@@ -23,6 +23,7 @@ const corsHeaders = {
 const WORKFLOW_STATUSES = new Set(['new', 'reviewed', 'accepted', 'in-progress', 'completed', 'deferred', 'dismissed']);
 const workflowKey = id => `content-opportunity:workflow:${id}`;
 const SEARCH_INTELLIGENCE_KEY = 'content-opportunity:search-intelligence:v1';
+const DEFAULT_SEARCH_INTELLIGENCE_URL = 'https://search-intelligence.oceanliners.net/api/search-intelligence';
 
 async function readWorkflow(env, id) {
   if (!env.OPPORTUNITY_STATE) return null;
@@ -44,6 +45,55 @@ async function writeSearchIntelligence(env, snapshot) {
   if (!env.OPPORTUNITY_STATE) return false;
   await env.OPPORTUNITY_STATE.put(SEARCH_INTELLIGENCE_KEY, JSON.stringify(snapshot));
   return true;
+}
+
+function asSearchSnapshot(payload, source) {
+  const candidate = payload?.snapshot || payload;
+  if (Array.isArray(candidate?.pages) && candidate.pages.length) {
+    return {
+      format: candidate.format || 'curatoros-search-intelligence',
+      formatVersion: candidate.formatVersion || 1,
+      importedAt: candidate.importedAt || candidate.generatedAt || new Date().toISOString(),
+      source: candidate.source || source,
+      rowCount: Number(candidate.rowCount || candidate.rows || candidate.pages.length),
+      pageCount: Number(candidate.pageCount || candidate.pages.length),
+      pages: candidate.pages
+    };
+  }
+  const normalized = normalizeSearchIntelligence(candidate);
+  return normalized.pageCount ? { ...normalized, source: normalized.source === 'search-console-import' ? source : normalized.source } : null;
+}
+
+async function fetchLiveSearchIntelligence(env) {
+  const endpoint = env.SEARCH_INTELLIGENCE_URL || DEFAULT_SEARCH_INTELLIGENCE_URL;
+  const response = await fetch(endpoint, {
+    headers: {
+      accept: 'application/json',
+      'user-agent': 'CuratorOS-Content-Opportunity/0.6 (+https://content.oceanliners.net)'
+    },
+    cf: { cacheTtl: 120, cacheEverything: true }
+  });
+  if (!response.ok) throw new Error(`Search Intelligence returned HTTP ${response.status}`);
+  const payload = await response.json();
+  const snapshot = asSearchSnapshot(payload, endpoint);
+  if (!snapshot?.pageCount) throw new Error('Search Intelligence returned no usable page metrics.');
+  return { snapshot, endpoint };
+}
+
+async function resolveSearchIntelligence(env, { preferLive = true } = {}) {
+  if (preferLive) {
+    try {
+      const live = await fetchLiveSearchIntelligence(env);
+      await writeSearchIntelligence(env, live.snapshot).catch(() => false);
+      return { snapshot: live.snapshot, mode: 'live', endpoint: live.endpoint, fallback: false };
+    } catch (error) {
+      const saved = await readSearchIntelligence(env).catch(() => null);
+      if (saved) return { snapshot: saved, mode: 'kv-fallback', endpoint: env.SEARCH_INTELLIGENCE_URL || DEFAULT_SEARCH_INTELLIGENCE_URL, fallback: true, liveError: error?.message || String(error) };
+      return { snapshot: null, mode: 'unavailable', endpoint: env.SEARCH_INTELLIGENCE_URL || DEFAULT_SEARCH_INTELLIGENCE_URL, fallback: false, liveError: error?.message || String(error) };
+    }
+  }
+  const saved = await readSearchIntelligence(env).catch(() => null);
+  return { snapshot: saved, mode: saved ? 'kv' : 'unavailable', endpoint: env.SEARCH_INTELLIGENCE_URL || DEFAULT_SEARCH_INTELLIGENCE_URL, fallback: false };
 }
 
 async function attachWorkflow(env, opportunities) {
@@ -70,7 +120,7 @@ export default {
       return json({
         ok: true,
         service: env.APP_NAME || 'CuratorOS Content Opportunity Finder',
-        version: '0.5.0',
+        version: '0.6.0',
         siteOrigin,
         scoringVersion: scoringConfig.version,
         workflowPersistence: env.OPPORTUNITY_STATE ? 'kv' : 'browser',
@@ -79,13 +129,14 @@ export default {
         linkGapInspection: true,
         automaticGraphDiscovery: true,
         linkMapSource: DEFAULT_GRAPH_URL,
-        searchIntelligence: searchSnapshot ? {
-          connected: true,
+        searchIntelligenceEndpoint: env.SEARCH_INTELLIGENCE_URL || DEFAULT_SEARCH_INTELLIGENCE_URL,
+        searchIntelligenceFallback: searchSnapshot ? {
+          available: true,
           importedAt: searchSnapshot.importedAt || null,
           pageCount: searchSnapshot.pageCount || 0,
           rowCount: searchSnapshot.rowCount || 0,
           source: searchSnapshot.source || null
-        } : { connected: false }
+        } : { available: false }
       }, { headers: corsHeaders });
     }
 
@@ -113,29 +164,23 @@ export default {
 
     if (url.pathname === '/api/search-intelligence') {
       if (request.method === 'GET') {
-        const snapshot = await readSearchIntelligence(env);
+        const resolved = await resolveSearchIntelligence(env, { preferLive: url.searchParams.get('live') !== '0' });
         return json({
           ok: true,
-          connected: Boolean(snapshot),
-          snapshot: snapshot ? {
-            format: snapshot.format,
-            formatVersion: snapshot.formatVersion,
-            importedAt: snapshot.importedAt,
-            source: snapshot.source,
-            rowCount: snapshot.rowCount,
-            pageCount: snapshot.pageCount,
-            pages: snapshot.pages
-          } : null
+          connected: Boolean(resolved.snapshot),
+          mode: resolved.mode,
+          endpoint: resolved.endpoint,
+          fallback: resolved.fallback,
+          liveError: resolved.liveError || null,
+          snapshot: resolved.snapshot
         }, { headers: corsHeaders });
       }
 
       if (request.method === 'POST' || request.method === 'PUT') {
         try {
           const body = await request.json();
-          const snapshot = normalizeSearchIntelligence(body);
-          if (!snapshot.rowCount || !snapshot.pageCount) {
-            return json({ ok: false, error: 'No usable page-level Search Console rows were found.' }, { status: 400, headers: corsHeaders });
-          }
+          const snapshot = asSearchSnapshot(body, 'manual-import');
+          if (!snapshot?.pageCount) return json({ ok: false, error: 'No usable page-level Search Console rows were found.' }, { status: 400, headers: corsHeaders });
           const persisted = await writeSearchIntelligence(env, snapshot);
           if (!persisted) return json({ ok: false, error: 'OPPORTUNITY_STATE is required to save Search Intelligence.' }, { status: 503, headers: corsHeaders });
           return json({ ok: true, persistence: 'kv', snapshot: { importedAt: snapshot.importedAt, source: snapshot.source, rowCount: snapshot.rowCount, pageCount: snapshot.pageCount } }, { headers: corsHeaders });
@@ -149,26 +194,30 @@ export default {
       try {
         let options = {};
         if (request.method === 'POST') options = await request.json().catch(() => ({}));
-        const [graph, searchSnapshot] = await Promise.all([
+        const [graph, searchResolved] = await Promise.all([
           fetchLinkGraph(),
-          readSearchIntelligence(env).catch(() => null)
+          resolveSearchIntelligence(env, { preferLive: options?.searchIntelligence?.preferLive !== false })
         ]);
         let generated = generateLinkOpportunities(graph, options?.graph || options || {}).map(item => ({ ...item, generatedAutomatically: true }));
-        if (searchSnapshot) generated = enrichItemsWithSearchIntelligence(generated, searchSnapshot);
+        if (searchResolved.snapshot) generated = enrichItemsWithSearchIntelligence(generated, searchResolved.snapshot);
         const opportunities = discoverOpportunities({ items: generated }, scoringConfig);
         await attachWorkflow(env, opportunities);
         return json({
           generatedAt: new Date().toISOString(),
-          mode: searchSnapshot ? 'automatic-link-map-search-intelligence' : 'automatic-link-map',
+          mode: searchResolved.snapshot ? 'automatic-link-map-search-intelligence' : 'automatic-link-map',
           graph: { source: DEFAULT_GRAPH_URL, generatedAt: graph.generatedAt || null, pages: graph.pages.length, edges: graph.edges.length },
-          searchIntelligence: searchSnapshot ? {
-            used: true,
-            importedAt: searchSnapshot.importedAt,
-            source: searchSnapshot.source,
-            pages: searchSnapshot.pageCount,
-            rows: searchSnapshot.rowCount,
+          searchIntelligence: {
+            used: Boolean(searchResolved.snapshot),
+            mode: searchResolved.mode,
+            endpoint: searchResolved.endpoint,
+            fallback: searchResolved.fallback,
+            liveError: searchResolved.liveError || null,
+            importedAt: searchResolved.snapshot?.importedAt || null,
+            source: searchResolved.snapshot?.source || null,
+            pages: searchResolved.snapshot?.pageCount || 0,
+            rows: searchResolved.snapshot?.rowCount || 0,
             matchedOpportunities: opportunities.filter(item => item.searchIntelligenceMatch).length
-          } : { used: false },
+          },
           summary: summarizeOpportunities(opportunities),
           opportunities
         }, { headers: corsHeaders });
@@ -190,8 +239,15 @@ export default {
 
         let items = Array.isArray(enrichedDataset?.items) ? enrichedDataset.items : [];
         let searchSnapshot = null;
-        if (dataset?.searchIntelligence) searchSnapshot = normalizeSearchIntelligence(dataset.searchIntelligence);
-        else if (dataset?.options?.useSavedSearchIntelligence !== false) searchSnapshot = await readSearchIntelligence(env).catch(() => null);
+        let searchMode = 'none';
+        if (dataset?.searchIntelligence) {
+          searchSnapshot = asSearchSnapshot(dataset.searchIntelligence, 'embedded-analysis');
+          searchMode = searchSnapshot ? 'embedded' : 'none';
+        } else if (dataset?.options?.useSearchIntelligence !== false) {
+          const resolved = await resolveSearchIntelligence(env, { preferLive: dataset?.options?.preferLiveSearchIntelligence !== false });
+          searchSnapshot = resolved.snapshot;
+          searchMode = resolved.mode;
+        }
         if (searchSnapshot) items = enrichItemsWithSearchIntelligence(items, searchSnapshot);
 
         const opportunities = discoverOpportunities({ ...enrichedDataset, items }, scoringConfig);
@@ -204,6 +260,7 @@ export default {
           siteKnowledge: enrichedDataset.siteKnowledge || null,
           inventoryUsed: Boolean(inventory),
           searchIntelligenceUsed: Boolean(searchSnapshot),
+          searchIntelligenceMode: searchMode,
           opportunities
         }, { headers: corsHeaders });
       } catch (error) {
