@@ -5,6 +5,7 @@ import { enrichWithSiteKnowledge } from './src/site-enrichment.js';
 import { fetchLinkGraph, generateLinkOpportunities, DEFAULT_GRAPH_URL } from './src/link-graph.js';
 import { normalizeSearchIntelligence, enrichItemsWithSearchIntelligence } from './src/search-intelligence.js';
 import { fetchProjectRecords, normalizeProjectRecords, generateEntityOpportunities, DEFAULT_PROJECT_RECORDS_URL } from './src/project-records.js';
+import { makeDiscoverySnapshot, compareDiscovery, reconciliationSummary } from './src/reconciliation.js';
 
 const json = (data, init = {}) => new Response(JSON.stringify(data, null, 2), {
   ...init,
@@ -22,9 +23,11 @@ const corsHeaders = {
 };
 
 const WORKFLOW_STATUSES = new Set(['new', 'reviewed', 'accepted', 'in-progress', 'completed', 'deferred', 'dismissed']);
+const ACTIVE_WORKFLOW_STATUSES = new Set(['new', 'reviewed', 'accepted', 'in-progress']);
 const workflowKey = id => `content-opportunity:workflow:${id}`;
 const SEARCH_INTELLIGENCE_KEY = 'content-opportunity:search-intelligence:v1';
 const PROJECT_RECORDS_KEY = 'content-opportunity:project-records:v1';
+const DISCOVERY_SNAPSHOT_KEY = 'content-opportunity:discovery-snapshot:v1';
 const DEFAULT_SEARCH_INTELLIGENCE_URL = 'https://search-intelligence.oceanliners.net/api/search-intelligence';
 
 async function readWorkflow(env, id) {
@@ -53,6 +56,8 @@ const readSearchIntelligence = env => readKvJson(env, SEARCH_INTELLIGENCE_KEY);
 const writeSearchIntelligence = (env, snapshot) => writeKvJson(env, SEARCH_INTELLIGENCE_KEY, snapshot);
 const readProjectRecords = env => readKvJson(env, PROJECT_RECORDS_KEY);
 const writeProjectRecords = (env, snapshot) => writeKvJson(env, PROJECT_RECORDS_KEY, snapshot);
+const readDiscoverySnapshot = env => readKvJson(env, DISCOVERY_SNAPSHOT_KEY);
+const writeDiscoverySnapshot = (env, snapshot) => writeKvJson(env, DISCOVERY_SNAPSHOT_KEY, snapshot);
 
 function asSearchSnapshot(payload, source) {
   const candidate = payload?.snapshot || payload;
@@ -74,7 +79,7 @@ function asSearchSnapshot(payload, source) {
 async function fetchLiveSearchIntelligence(env) {
   const endpoint = env.SEARCH_INTELLIGENCE_URL || DEFAULT_SEARCH_INTELLIGENCE_URL;
   const response = await fetch(endpoint, {
-    headers: { accept: 'application/json', 'user-agent': 'CuratorOS-Content-Opportunity/0.7 (+https://content.oceanliners.net)' },
+    headers: { accept: 'application/json', 'user-agent': 'CuratorOS-Content-Opportunity/0.8 (+https://content.oceanliners.net)' },
     cf: { cacheTtl: 120, cacheEverything: true }
   });
   if (!response.ok) throw new Error(`Search Intelligence returned HTTP ${response.status}`);
@@ -127,8 +132,68 @@ async function attachWorkflow(env, opportunities) {
     item.workflowStatus = saved.workflowStatus || item.workflowStatus;
     item.notes = saved.notes || '';
     item.updatedAt = saved.updatedAt || null;
+    item.reconciliation = saved.reconciliation || null;
   }));
   return opportunities;
+}
+
+async function reconcileWorkflow(env, opportunities, evaluatedLanes) {
+  if (!env.OPPORTUNITY_STATE) return { enabled: false, ...reconciliationSummary() };
+  const previous = await readDiscoverySnapshot(env).catch(() => null);
+  const changes = compareDiscovery(previous, opportunities, evaluatedLanes);
+  const now = new Date().toISOString();
+  let autoCompleted = 0;
+  let autoReopened = 0;
+
+  if (previous) {
+    await Promise.all(changes.resolved.map(async item => {
+      const saved = await readWorkflow(env, item.id).catch(() => null);
+      const currentStatus = saved?.workflowStatus || 'new';
+      if (!ACTIVE_WORKFLOW_STATUSES.has(currentStatus)) return;
+      const record = {
+        id: item.id,
+        workflowStatus: 'completed',
+        notes: saved?.notes || '',
+        updatedAt: now,
+        reconciliation: {
+          autoCompleted: true,
+          reason: 'Opportunity no longer detected after successful reevaluation.',
+          lane: item.lane,
+          resolvedAt: now
+        }
+      };
+      if (await writeWorkflow(env, item.id, record)) autoCompleted += 1;
+    }));
+  }
+
+  await Promise.all(opportunities.map(async item => {
+    const saved = await readWorkflow(env, item.id).catch(() => null);
+    if (!saved?.reconciliation?.autoCompleted) return;
+    const record = {
+      id: item.id,
+      workflowStatus: 'new',
+      notes: saved.notes || '',
+      updatedAt: now,
+      reconciliation: {
+        autoCompleted: false,
+        autoReopened: true,
+        reason: 'Previously resolved opportunity is detected again.',
+        lane: item.projectRecordEvidence ? 'project-records' : item.graphEvidence ? 'link-map' : 'other',
+        reopenedAt: now,
+        previousResolvedAt: saved.reconciliation.resolvedAt || null
+      }
+    };
+    if (await writeWorkflow(env, item.id, record)) autoReopened += 1;
+  }));
+
+  await writeDiscoverySnapshot(env, makeDiscoverySnapshot(opportunities)).catch(() => false);
+  return {
+    enabled: true,
+    ...reconciliationSummary(changes),
+    autoCompleted,
+    autoReopened,
+    evaluatedLanes
+  };
 }
 
 export default {
@@ -139,14 +204,15 @@ export default {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
 
     if (url.pathname === '/api/health') {
-      const [searchSnapshot, projectSnapshot] = await Promise.all([
+      const [searchSnapshot, projectSnapshot, discoverySnapshot] = await Promise.all([
         readSearchIntelligence(env).catch(() => null),
-        readProjectRecords(env).catch(() => null)
+        readProjectRecords(env).catch(() => null),
+        readDiscoverySnapshot(env).catch(() => null)
       ]);
       return json({
         ok: true,
         service: env.APP_NAME || 'CuratorOS Content Opportunity Finder',
-        version: '0.7.0',
+        version: '0.8.0',
         siteOrigin,
         scoringVersion: scoringConfig.version,
         workflowPersistence: env.OPPORTUNITY_STATE ? 'kv' : 'browser',
@@ -155,6 +221,8 @@ export default {
         linkGapInspection: true,
         automaticGraphDiscovery: true,
         automaticEntityDiscovery: true,
+        lifecycleReconciliation: Boolean(env.OPPORTUNITY_STATE),
+        lastDiscoveryAt: discoverySnapshot?.generatedAt || null,
         linkMapSource: DEFAULT_GRAPH_URL,
         searchIntelligenceEndpoint: env.SEARCH_INTELLIGENCE_URL || DEFAULT_SEARCH_INTELLIGENCE_URL,
         projectRecordsEndpoint: env.PROJECT_RECORDS_URL || DEFAULT_PROJECT_RECORDS_URL,
@@ -223,6 +291,11 @@ export default {
       }
     }
 
+    if (url.pathname === '/api/reconciliation' && request.method === 'GET') {
+      const snapshot = await readDiscoverySnapshot(env).catch(() => null);
+      return json({ ok: true, enabled: Boolean(env.OPPORTUNITY_STATE), snapshot }, { headers: corsHeaders });
+    }
+
     if (url.pathname === '/api/discover' && (request.method === 'GET' || request.method === 'POST')) {
       try {
         let options = {};
@@ -241,7 +314,13 @@ export default {
         if (searchResolved.snapshot) generated = enrichItemsWithSearchIntelligence(generated, searchResolved.snapshot);
 
         const opportunities = discoverOpportunities({ items: generated }, scoringConfig);
+        const evaluatedLanes = ['link-map'];
+        if (projectResolved.snapshot) evaluatedLanes.push('project-records');
+        const reconciliation = options?.reconciliation?.enabled === false
+          ? { enabled: false }
+          : await reconcileWorkflow(env, opportunities, evaluatedLanes);
         await attachWorkflow(env, opportunities);
+
         return json({
           generatedAt: new Date().toISOString(),
           mode: projectResolved.snapshot ? 'automatic-full-intelligence' : searchResolved.snapshot ? 'automatic-link-map-search-intelligence' : 'automatic-link-map',
@@ -256,6 +335,7 @@ export default {
             liveError: projectResolved.liveError || null, records: projectResolved.snapshot?.recordCount || 0, version: projectResolved.snapshot?.version || 0,
             generatedOpportunities: opportunities.filter(item => item.projectRecordEvidence).length
           },
+          reconciliation,
           summary: summarizeOpportunities(opportunities),
           opportunities
         }, { headers: corsHeaders });
@@ -305,7 +385,7 @@ export default {
           const body = await request.json();
           const workflowStatus = String(body.workflowStatus || 'new');
           if (!WORKFLOW_STATUSES.has(workflowStatus)) return json({ ok: false, error: 'Invalid workflow status' }, { status: 400, headers: corsHeaders });
-          const record = { id, workflowStatus, notes: String(body.notes || '').slice(0, 5000), updatedAt: new Date().toISOString() };
+          const record = { id, workflowStatus, notes: String(body.notes || '').slice(0, 5000), updatedAt: new Date().toISOString(), reconciliation: null };
           const persisted = await writeWorkflow(env, id, record);
           return json({ ok: true, persistence: persisted ? 'kv' : 'browser', record }, { headers: corsHeaders });
         } catch (error) {
