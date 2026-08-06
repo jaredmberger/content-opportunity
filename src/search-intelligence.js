@@ -28,12 +28,43 @@ function firstValue(row, keys) {
   return '';
 }
 
+function curatorIntelligenceRows(payload) {
+  if (payload?.system?.id !== 'search-intelligence') return null;
+  const verificationPages = Array.isArray(payload?.verificationContext?.pages) ? payload.verificationContext.pages : [];
+  const querySignals = [...(Array.isArray(payload?.priorities) ? payload.priorities : []), ...(Array.isArray(payload?.opportunities) ? payload.opportunities : [])];
+  const queriesByPage = new Map();
+  for (const signal of querySignals) {
+    const page = normalizeUrl(signal?.entity || signal?.page || '');
+    const query = String(signal?.query || '').trim();
+    if (!page || !query) continue;
+    if (!queriesByPage.has(page)) queriesByPage.set(page, new Set());
+    queriesByPage.get(page).add(query);
+  }
+
+  const rows = [];
+  for (const page of verificationPages) {
+    const canonical = normalizeUrl(page?.path || page?.page || '');
+    const points = Array.isArray(page?.points) ? page.points.slice().sort((a, b) => String(a?.date || '').localeCompare(String(b?.date || ''))) : [];
+    const latest = points.at(-1);
+    if (!canonical || !latest) continue;
+    const queries = [...(queriesByPage.get(canonical) || [])];
+    if (queries.length) {
+      for (const query of queries) rows.push({ page: canonical, query, clicks: latest.clicks, impressions: latest.impressions, ctr: latest.ctr, position: latest.position });
+    } else {
+      rows.push({ page: canonical, clicks: latest.clicks, impressions: latest.impressions, ctr: latest.ctr, position: latest.position });
+    }
+  }
+
+  return rows;
+}
+
 export function normalizeSearchIntelligence(payload) {
-  const sourceRows = Array.isArray(payload) ? payload
+  const curatorRows = curatorIntelligenceRows(payload);
+  const sourceRows = curatorRows || (Array.isArray(payload) ? payload
     : Array.isArray(payload?.rows) ? payload.rows
     : Array.isArray(payload?.items) ? payload.items
     : Array.isArray(payload?.data) ? payload.data
-    : [];
+    : []);
 
   const rows = sourceRows.map(row => {
     const page = normalizeUrl(firstValue(row, [
@@ -102,7 +133,7 @@ export function normalizeSearchIntelligence(payload) {
     format: 'curatoros-search-intelligence',
     formatVersion: 1,
     importedAt: new Date().toISOString(),
-    source: String(payload?.source || 'search-console-import'),
+    source: String(payload?.source || (curatorRows ? 'curator-intelligence' : 'search-console-import')),
     rowCount: rows.length,
     pageCount: pages.length,
     pages
