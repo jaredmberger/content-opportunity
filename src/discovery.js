@@ -18,13 +18,21 @@ function typeFor(item) {
 }
 
 function recommendationFor(type, item) {
-  if (type === 'create') return `Create a canonical ${item.contentType || 'page'} for ${item.title}.`;
+  if (type === 'create') {
+    const refs = Number(item.projectRecordEvidence?.inboundRelationships || 0);
+    return refs > 0
+      ? `Create a canonical ${item.contentType || 'page'} for ${item.title}; ${refs} Project Record relationship${refs === 1 ? '' : 's'} already point to this entity.`
+      : `Create a canonical ${item.contentType || 'page'} for ${item.title}.`;
+  }
   if (type === 'expand') return `Strengthen ${item.title} with supporting sections, evidence, and related coverage.`;
   if (type === 'connect') {
     const count = Number(item.missingLinks || item.potentialLinks || 0);
     return count > 0
       ? `Improve internal linking for ${item.title}; CuratorOS identified ${count} strong missing connection${count === 1 ? '' : 's'}.`
       : `Add or improve internal links between ${item.title} and its strongest related pages.`;
+  }
+  if (item.projectRecordEvidence) {
+    return `Research ${item.title} before publication; the entity is structurally important in Project Records, but its evidence readiness needs review.`;
   }
   return `Research ${item.title} before publication and resolve the open evidence questions.`;
 }
@@ -63,6 +71,7 @@ export function discoverOpportunities(dataset, config) {
         inventoryResolved: Boolean(item.inventoryResolved),
         linkInspection: item.linkInspection || null,
         graphEvidence: item.graphEvidence || null,
+        projectRecordEvidence: item.projectRecordEvidence || null,
         relatedUrls: Array.isArray(item.relatedUrls) ? item.relatedUrls : [],
         generatedAutomatically: Boolean(item.generatedAutomatically)
       };
