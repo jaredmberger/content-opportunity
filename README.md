@@ -2,12 +2,20 @@
 
 Content Opportunity Finder is the editorial-planning engine for Ocean Liner Curator. It identifies where `oceanliners.net` should **Create**, **Expand**, **Connect**, or **Research** content and keeps the evidence behind every recommendation visible.
 
-## What exists in v0.2
+## What exists in v0.4
 
-- Cloudflare Worker runtime
-- CuratorOS-style responsive dashboard
-- `POST /api/analyze` analysis endpoint
-- Explainable weighted scoring model
+- Cloudflare Worker runtime at `content.oceanliners.net`
+- CuratorOS-style responsive, iPad-friendly dashboard
+- One-tap **Find Opportunities Automatically** workflow
+- Direct integration with the deployed CuratorOS Link Map dataset
+- High-confidence graph-derived internal-link opportunity generation
+- Focused topic/page discovery using page titles, URLs, clusters, and suggested graph connections
+- JSON file upload and immediate analysis
+- Advanced/manual pasted JSON input for testing and specialized datasets
+- Live Site Inventory enrichment for supplied opportunities
+- Existing-page/canonical resolution
+- Live missing-link inspection for explicitly related pages
+- Explainable weighted scoring
 - Four editorial action classes: Create, Expand, Connect, Research
 - Priority bands: High, Medium, Low
 - Evidence contributions shown per opportunity
@@ -16,12 +24,10 @@ Content Opportunity Finder is the editorial-planning engine for Ocean Liner Cura
 - Workflow states: New, Reviewed, Accepted, In Progress, Completed, Deferred, Dismissed
 - Cloudflare KV-backed workflow persistence
 - Browser-local fallback if KV is unavailable
-- Demonstration dataset for immediate testing
-- Mobile/iPad-friendly interface
 
 ## Cloudflare KV
 
-The Worker expects this KV binding:
+The Worker uses:
 
 ```toml
 [[kv_namespaces]]
@@ -29,73 +35,97 @@ binding = "OPPORTUNITY_STATE"
 id = "afce711ea6844278b0d7fe059c739be2"
 ```
 
-Workflow records are stored under keys shaped like:
+Workflow records are stored under:
 
 ```text
 content-opportunity:workflow:<opportunity-id>
 ```
 
-When the binding is present, KV is authoritative. Browser storage is only used as a fallback when server persistence is unavailable.
+When the binding is present, KV is authoritative. Browser storage is only a fallback.
 
-## Run locally
+## Main user workflows
 
-```bash
-npm install
-npm run dev
-```
+### Automatic discovery
 
-Then open the local Wrangler URL, load the sample dataset, and choose **Analyze opportunities**.
-
-## Deploy
-
-```bash
-npm run deploy
-```
-
-The production custom domain is:
+Choose **Find Opportunities Automatically**. The Worker reads:
 
 ```text
-https://content.oceanliners.net
+https://curator.oceanliners.net/link-map/link-map-data.json
 ```
+
+It builds incoming/outgoing neighborhoods, finds same-type pages with strong shared graph neighbors but no direct connection, generates Connect opportunities, scores them, and merges saved workflow state from KV.
+
+### Topic or page discovery
+
+Enter a ship, subject, page title, or URL fragment such as:
+
+```text
+RMS Olympic
+Titanic
+Cunard
+/ships/rms-olympic
+```
+
+The dashboard focuses the automatically generated graph opportunities around matching page titles, URLs, clusters, and suggested connections.
+
+### File analysis
+
+Choose a `.json` file. The dashboard loads it into the manual analysis pathway and runs it immediately.
+
+### Advanced/manual analysis
+
+The pasted-JSON interface remains available under **Advanced / manual dataset** for testing, unusual data sources, or direct CuratorOS interchange.
 
 ## API
 
 ### `GET /api/health`
 
-Returns service/version status and reports whether workflow persistence is using Cloudflare KV or browser fallback.
+Returns service/version status, persistence mode, Site Inventory capability, and Link Map discovery capability.
 
 ### `GET /api/config`
 
-Returns the current scoring configuration and supported workflow states.
+Returns scoring configuration and supported workflow states.
+
+### `GET /api/site-inventory`
+
+Reads the public Ocean Liner Curator site index and returns a normalized inventory of existing pages.
+
+### `GET /api/link-graph`
+
+Checks the current CuratorOS Link Map dataset and returns graph metadata.
+
+### `GET /api/discover`
+
+Runs automatic Link Map opportunity discovery and returns scored opportunities with saved workflow state.
+
+### `POST /api/discover`
+
+Same automatic discovery pathway with optional graph-generation settings.
 
 ### `POST /api/analyze`
 
-Accepts:
+Accepts a supplied opportunity dataset, enriches it with live Site Inventory knowledge unless disabled, scores it, and merges saved workflow state.
+
+Example item:
 
 ```json
 {
-  "items": [
-    {
-      "title": "RMS Carmania",
-      "contentType": "ship guide",
-      "cluster": "Cunard · Edwardian Liners",
-      "canonicalUrl": null,
-      "entityMentions": 11,
-      "potentialLinks": 7,
-      "missingLinks": 7,
-      "clusterGap": true,
-      "clusterDepth": 10,
-      "searchImpressions": 620,
-      "averagePosition": 12.4,
-      "editorialImportance": 9,
-      "unresolvedQuestions": [],
-      "sources": ["site-index", "link-graph", "search-intelligence"]
-    }
-  ]
+  "title": "RMS Carmania",
+  "contentType": "ship guide",
+  "cluster": "Cunard · Edwardian Liners",
+  "canonicalUrl": null,
+  "entityMentions": 11,
+  "potentialLinks": 7,
+  "missingLinks": 7,
+  "clusterGap": true,
+  "clusterDepth": 10,
+  "searchImpressions": 620,
+  "averagePosition": 12.4,
+  "editorialImportance": 9,
+  "unresolvedQuestions": [],
+  "sources": ["site-index", "link-graph", "search-intelligence"]
 }
 ```
-
-Returns ranked opportunities with score, priority, editorial action, recommendation, factor-level evidence, and any saved workflow state.
 
 ### `GET /api/workflow/:id`
 
@@ -103,16 +133,7 @@ Returns the saved workflow record for one opportunity.
 
 ### `PUT /api/workflow/:id`
 
-Saves an opportunity workflow state and editorial notes.
-
-Example:
-
-```json
-{
-  "workflowStatus": "accepted",
-  "notes": "Good Cunard cluster gap. Build after Carmania source review."
-}
-```
+Saves workflow state and editorial notes.
 
 Supported statuses:
 
@@ -128,28 +149,26 @@ dismissed
 
 ## Scoring philosophy
 
-The score is deliberately explainable. Each input contributes a visible number of points. The current model balances repeated entity mentions, internal-link potential, cluster gaps, existing cluster depth, search demand, striking-distance search rankings, and editorial importance.
+The score is deliberately explainable. Each input contributes visible points. The model balances repeated entity mentions, internal-link potential, cluster gaps, existing cluster depth, search demand, striking-distance rankings, and editorial importance.
 
-The weights live in `config/scoring.json`, so the editorial model can evolve without rewriting the discovery engine. Search demand is only one signal; the system is intended to serve Ocean Liner Curator's editorial mission rather than turn CuratorOS into a generic keyword-volume machine.
+Search demand is only one signal. Content Opportunity Finder is designed to serve Ocean Liner Curator's editorial mission rather than become a generic keyword-volume tool.
 
-## Architecture
+## Current architecture
 
 ```text
-Search Intelligence ───────┐
-Site Index ────────────────┤
-Internal Link Graph ───────┤
-Entity / Knowledge Registry├──> Discovery Engine ──> Scoring ──> Opportunity Queue
-Research Records ──────────┤                              │
-Editorial priorities ──────┘                              ├──> Evidence / explanation
-                                                         └──> KV workflow state
+Ocean Liner Curator Site Index ───────┐
+                                      ├──> Site Knowledge Enrichment ──┐
+Supplied / Imported Datasets ─────────┘                                │
+                                                                       ├──> Discovery + Scoring ──> Opportunity Queue ──> KV Workflow
+CuratorOS Link Map ──> Graph Opportunity Generator ────────────────────┘
 ```
 
 ## Next integrations
 
-The next phase is replacing manually supplied metrics with live CuratorOS inputs. Highest-value targets are:
+Highest-value next targets:
 
-1. Site inventory / canonical-page registry
-2. Internal Link Graph output
-3. Search Intelligence / Search Console-derived metrics
-4. Entity Registry and research records
-5. Automatic opportunity refresh and stale/completed-opportunity reconciliation
+1. Search Intelligence / Search Console metrics as a live data feed
+2. Permanent CuratorOS Project Records / Entity Registry
+3. Automatic missing-topic generation from entities that recur in records but lack canonical pages
+4. Opportunity reconciliation when links/pages change
+5. Completed-opportunity verification and automatic re-opening when a problem returns
