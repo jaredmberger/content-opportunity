@@ -46,7 +46,10 @@ export function discoverOpportunities(dataset, config) {
         unresolvedQuestions: Array.isArray(item.unresolvedQuestions) ? item.unresolvedQuestions : [],
         sources: Array.isArray(item.sources) ? item.sources : [],
         workflowStatus: item.workflowStatus || 'new',
-        notes: item.notes || ''
+        notes: item.notes || '',
+        siteInventoryMatch: item.siteInventoryMatch || null,
+        inventoryResolved: Boolean(item.inventoryResolved),
+        linkInspection: item.linkInspection || null
       };
 
       const scored = scoreOpportunity(base, config);
