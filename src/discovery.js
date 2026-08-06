@@ -1,4 +1,5 @@
 import { scoreOpportunity, summarizeEvidence } from './scoring.js';
+import { consolidateAndPrioritize } from './prioritization.js';
 
 function slugify(value = '') {
   return String(value)
@@ -40,51 +41,51 @@ function recommendationFor(type, item) {
 export function discoverOpportunities(dataset, config) {
   const items = Array.isArray(dataset?.items) ? dataset.items : [];
 
-  return items
-    .map(item => {
-      const type = typeFor(item);
-      const base = {
-        id: item.id || slugify(item.title),
-        title: item.title || 'Untitled opportunity',
-        type,
-        contentType: item.contentType || 'page',
-        cluster: item.cluster || 'Unclassified',
-        canonicalUrl: item.canonicalUrl || null,
-        entityMentions: Number(item.entityMentions || 0),
-        potentialLinks: Number(item.potentialLinks || 0),
-        missingLinks: Number(item.missingLinks || 0),
-        clusterGap: Boolean(item.clusterGap),
-        clusterDepth: Number(item.clusterDepth || 0),
-        searchImpressions: Number(item.searchImpressions || 0),
-        averagePosition: Number(item.averagePosition || 0),
-        searchClicks: Number(item.searchClicks || 0),
-        searchCtr: Number(item.searchCtr || 0),
-        searchQueryCount: Number(item.searchQueryCount || 0),
-        searchTopQueries: Array.isArray(item.searchTopQueries) ? item.searchTopQueries : [],
-        searchIntelligenceMatch: Boolean(item.searchIntelligenceMatch),
-        editorialImportance: Number(item.editorialImportance || 0),
-        unresolvedQuestions: Array.isArray(item.unresolvedQuestions) ? item.unresolvedQuestions : [],
-        sources: Array.isArray(item.sources) ? item.sources : [],
-        workflowStatus: item.workflowStatus || 'new',
-        notes: item.notes || '',
-        siteInventoryMatch: item.siteInventoryMatch || null,
-        inventoryResolved: Boolean(item.inventoryResolved),
-        linkInspection: item.linkInspection || null,
-        graphEvidence: item.graphEvidence || null,
-        projectRecordEvidence: item.projectRecordEvidence || null,
-        relatedUrls: Array.isArray(item.relatedUrls) ? item.relatedUrls : [],
-        generatedAutomatically: Boolean(item.generatedAutomatically)
-      };
+  const scored = items.map(item => {
+    const type = typeFor(item);
+    const base = {
+      id: item.id || slugify(item.title),
+      title: item.title || 'Untitled opportunity',
+      type,
+      contentType: item.contentType || 'page',
+      cluster: item.cluster || 'Unclassified',
+      canonicalUrl: item.canonicalUrl || null,
+      entityMentions: Number(item.entityMentions || 0),
+      potentialLinks: Number(item.potentialLinks || 0),
+      missingLinks: Number(item.missingLinks || 0),
+      clusterGap: Boolean(item.clusterGap),
+      clusterDepth: Number(item.clusterDepth || 0),
+      searchImpressions: Number(item.searchImpressions || 0),
+      averagePosition: Number(item.averagePosition || 0),
+      searchClicks: Number(item.searchClicks || 0),
+      searchCtr: Number(item.searchCtr || 0),
+      searchQueryCount: Number(item.searchQueryCount || 0),
+      searchTopQueries: Array.isArray(item.searchTopQueries) ? item.searchTopQueries : [],
+      searchIntelligenceMatch: Boolean(item.searchIntelligenceMatch),
+      editorialImportance: Number(item.editorialImportance || 0),
+      unresolvedQuestions: Array.isArray(item.unresolvedQuestions) ? item.unresolvedQuestions : [],
+      sources: Array.isArray(item.sources) ? item.sources : [],
+      workflowStatus: item.workflowStatus || 'new',
+      notes: item.notes || '',
+      siteInventoryMatch: item.siteInventoryMatch || null,
+      inventoryResolved: Boolean(item.inventoryResolved),
+      linkInspection: item.linkInspection || null,
+      graphEvidence: item.graphEvidence || null,
+      projectRecordEvidence: item.projectRecordEvidence || null,
+      relatedUrls: Array.isArray(item.relatedUrls) ? item.relatedUrls : [],
+      generatedAutomatically: Boolean(item.generatedAutomatically)
+    };
 
-      const scored = scoreOpportunity(base, config);
-      return {
-        ...base,
-        ...scored,
-        recommendation: recommendationFor(type, base),
-        evidence: summarizeEvidence(scored)
-      };
-    })
-    .sort((a, b) => b.score - a.score || a.title.localeCompare(b.title));
+    const result = scoreOpportunity(base, config);
+    return {
+      ...base,
+      ...result,
+      recommendation: recommendationFor(type, base),
+      evidence: summarizeEvidence(result)
+    };
+  });
+
+  return consolidateAndPrioritize(scored);
 }
 
 export function summarizeOpportunities(opportunities) {
@@ -96,12 +97,26 @@ export function summarizeOpportunities(opportunities) {
     create: 0,
     expand: 0,
     connect: 0,
-    research: 0
+    research: 0,
+    multiSignal: 0,
+    threePlusSignals: 0
   };
 
   for (const item of opportunities) {
     summary[item.priority] = (summary[item.priority] || 0) + 1;
     summary[item.type] = (summary[item.type] || 0) + 1;
+    const signalCount = Number(item.prioritization?.independentSignals || 0);
+    if (signalCount >= 2) summary.multiSignal += 1;
+    if (signalCount >= 3) summary.threePlusSignals += 1;
+  }
+  if (opportunities[0]) {
+    summary.workNext = {
+      id: opportunities[0].id,
+      title: opportunities[0].title,
+      type: opportunities[0].type,
+      decisionScore: opportunities[0].decisionScore,
+      signals: opportunities[0].prioritization?.signalLanes || []
+    };
   }
   return summary;
 }
