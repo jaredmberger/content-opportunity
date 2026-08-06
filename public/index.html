@@ -14,7 +14,7 @@
       <div>
         <p class="eyebrow">CuratorOS · Editorial Intelligence</p>
         <h1>Content Opportunity Finder</h1>
-        <p class="lede">Find what oceanliners.net should create, expand, connect, or research — then review, accept, defer, and complete those opportunities from one queue.</p>
+        <p class="lede">Let CuratorOS inspect the site and Link Map, identify strong editorial opportunities, explain the evidence, and keep each decision in a persistent workflow queue.</p>
       </div>
       <div class="status-stack">
         <div class="status" id="status">Checking engine…</div>
@@ -22,24 +22,55 @@
       </div>
     </header>
 
-    <section class="toolbar panel">
+    <section class="launch panel">
       <div>
-        <label for="dataset">Analysis dataset</label>
-        <textarea id="dataset" spellcheck="false" aria-describedby="datasetHelp"></textarea>
-        <p id="datasetHelp" class="hint">Paste CuratorOS inventory/link/search JSON here, or load the built-in demonstration dataset.</p>
+        <p class="eyebrow">Automatic Discovery</p>
+        <h2>What should we work on next?</h2>
+        <p>CuratorOS will read the current Link Map and surface high-confidence opportunities automatically. No pasted JSON required.</p>
       </div>
-      <div class="actions">
-        <button id="loadSample" class="secondary">Load sample</button>
-        <button id="analyze">Analyze opportunities</button>
-      </div>
+      <button id="discover" class="primary-large">Find Opportunities Automatically</button>
+      <p class="launch-meta" id="discoveryMeta">Uses the deployed CuratorOS Link Map and your saved opportunity workflow.</p>
     </section>
+
+    <section class="input-grid">
+      <section class="panel input-card">
+        <p class="eyebrow">Import</p>
+        <h3>Analyze a file</h3>
+        <p>Use a JSON dataset from Search Intelligence, Link Map, a CuratorOS export, or another compatible source.</p>
+        <input id="fileInput" type="file" accept="application/json,.json" hidden />
+        <button id="chooseFile" class="secondary">Choose JSON file</button>
+        <span class="file-name" id="fileName">No file selected</span>
+      </section>
+
+      <section class="panel input-card">
+        <p class="eyebrow">Coming Next</p>
+        <h3>Analyze a topic or page</h3>
+        <p>Topic/page lookup will sit here next, using site inventory and graph context instead of requiring structured input.</p>
+        <div class="topic-preview"><input type="text" placeholder="RMS Carmania, Cunard, Olympic class…" disabled /><button disabled>Analyze</button></div>
+      </section>
+    </section>
+
+    <details class="advanced panel">
+      <summary>Advanced / manual dataset</summary>
+      <div class="toolbar">
+        <div>
+          <label for="dataset">Analysis dataset</label>
+          <textarea id="dataset" spellcheck="false" aria-describedby="datasetHelp"></textarea>
+          <p id="datasetHelp" class="hint">Paste compatible CuratorOS JSON here for testing or specialized analyses.</p>
+        </div>
+        <div class="actions">
+          <button id="loadSample" class="secondary">Load sample</button>
+          <button id="analyze">Analyze dataset</button>
+        </div>
+      </div>
+    </details>
 
     <section id="summary" class="summary-grid" aria-live="polite"></section>
 
     <section class="queue-tools panel">
       <div>
         <label for="searchQueue">Search queue</label>
-        <input id="searchQueue" type="search" placeholder="Ship, cluster, recommendation…" />
+        <input id="searchQueue" type="search" placeholder="Ship, page, cluster, recommendation…" />
       </div>
       <div>
         <label for="workflowFilter">Workflow</label>
@@ -66,7 +97,7 @@
     </section>
 
     <section id="results" class="results" aria-live="polite">
-      <div class="empty panel">Load the sample dataset or paste CuratorOS data to begin.</div>
+      <div class="empty panel">Choose <strong>Find Opportunities Automatically</strong> to let CuratorOS inspect the live graph.</div>
     </section>
   </main>
   <script type="module" src="/app.js"></script>
