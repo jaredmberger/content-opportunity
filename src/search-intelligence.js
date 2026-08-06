@@ -36,15 +36,17 @@ export function normalizeSearchIntelligence(payload) {
     : [];
 
   const rows = sourceRows.map(row => {
-    const page = normalizeUrl(firstValue(row, ['page', 'url', 'Page', 'URL', 'landingPage', 'canonicalUrl']));
+    const page = normalizeUrl(firstValue(row, [
+      'page', 'url', 'Page', 'URL', 'Top pages', 'Landing page', 'landingPage', 'canonicalUrl'
+    ]));
     if (!page) return null;
-    const query = String(firstValue(row, ['query', 'Query', 'keyword', 'searchTerm']) || '').trim();
+    const query = String(firstValue(row, ['query', 'Query', 'Top queries', 'keyword', 'searchTerm']) || '').trim();
     const clicks = number(firstValue(row, ['clicks', 'Clicks']));
     const impressions = number(firstValue(row, ['impressions', 'Impressions']));
-    let ctr = number(firstValue(row, ['ctr', 'CTR']));
+    let ctr = number(firstValue(row, ['ctr', 'CTR', 'Average CTR']));
     if (ctr > 1) ctr /= 100;
     if (!ctr && impressions > 0) ctr = clicks / impressions;
-    const position = number(firstValue(row, ['position', 'Position', 'averagePosition', 'avgPosition']));
+    const position = number(firstValue(row, ['position', 'Position', 'Average position', 'averagePosition', 'avgPosition']));
     return { page, query, clicks, impressions, ctr, position };
   }).filter(Boolean);
 
