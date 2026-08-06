@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "weights": {
+    "entityMentions": 18,
+    "internalLinkPotential": 16,
+    "clusterGap": 18,
+    "clusterDepth": 12,
+    "searchDemand": 18,
+    "strikingDistance": 10,
+    "editorialImportance": 8
+  },
+  "thresholds": {
+    "high": 75,
+    "medium": 50,
+    "low": 0
+  },
+  "rules": {
+    "create": {
+      "requiresMissingCanonical": true
+    },
+    "expand": {
+      "requiresExistingCanonical": true
+    },
+    "connect": {
+      "minimumPotentialLinks": 2
+    },
+    "research": {
+      "minimumUnresolvedQuestions": 1
+    }
+  }
+}
