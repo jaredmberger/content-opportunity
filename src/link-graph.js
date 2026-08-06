@@ -1,4 +1,4 @@
-const DEFAULT_GRAPH_URL = 'https://curator.oceanliners.net/api/link-map';
+const DEFAULT_GRAPH_URL = 'https://link-map.oceanliners.net/api/graph';
 
 function pageType(url) {
   const path = new URL(url).pathname.toLowerCase();
@@ -37,17 +37,19 @@ export async function fetchLinkGraph(graphUrl = DEFAULT_GRAPH_URL) {
   const response = await fetch(endpoint, {
     headers: {
       accept: 'application/json',
-      'user-agent': 'CuratorOS-Content-Opportunity/0.8.3 (+https://content.oceanliners.net)'
+      'user-agent': 'CuratorOS-Content-Opportunity/0.8.4 (+https://content.oceanliners.net)'
     },
     cf: { cacheTtl: 300, cacheEverything: true }
   });
-  if (!response.ok) throw new Error(`Link Map API returned HTTP ${response.status}`);
   const text = await response.text();
   let payload;
-  try { payload = JSON.parse(text); }
-  catch { throw new Error(`Link Map returned non-JSON: ${text.slice(0, 80)}`); }
+  try { payload = text ? JSON.parse(text) : null; }
+  catch { throw new Error(`Link Map graph returned non-JSON: ${text.slice(0, 80)}`); }
+  if (!response.ok || payload?.ok === false) {
+    throw new Error(payload?.error || `Link Map graph returned HTTP ${response.status}`);
+  }
   const graph = normalizeGraphPayload(payload, endpoint);
-  if (!graph) throw new Error('Link Map API is missing pages or edges.');
+  if (!graph) throw new Error('Link Map graph is missing pages or edges.');
   return graph;
 }
 
