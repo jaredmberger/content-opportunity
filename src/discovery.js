@@ -13,14 +13,19 @@ function typeFor(item) {
   if (['create', 'expand', 'connect', 'research'].includes(explicit)) return explicit;
   if ((item.unresolvedQuestions?.length ?? 0) > 0 && !item.canonicalUrl) return 'research';
   if (!item.canonicalUrl) return 'create';
-  if ((item.potentialLinks ?? 0) >= 2 && (item.missingLinks ?? 0) > 0) return 'connect';
+  if ((item.potentialLinks ?? 0) >= 1 && (item.missingLinks ?? 0) > 0) return 'connect';
   return 'expand';
 }
 
 function recommendationFor(type, item) {
   if (type === 'create') return `Create a canonical ${item.contentType || 'page'} for ${item.title}.`;
   if (type === 'expand') return `Strengthen ${item.title} with supporting sections, evidence, and related coverage.`;
-  if (type === 'connect') return `Add or improve internal links between ${item.title} and its strongest related pages.`;
+  if (type === 'connect') {
+    const count = Number(item.missingLinks || item.potentialLinks || 0);
+    return count > 0
+      ? `Improve internal linking for ${item.title}; CuratorOS identified ${count} strong missing connection${count === 1 ? '' : 's'}.`
+      : `Add or improve internal links between ${item.title} and its strongest related pages.`;
+  }
   return `Research ${item.title} before publication and resolve the open evidence questions.`;
 }
 
@@ -53,7 +58,8 @@ export function discoverOpportunities(dataset, config) {
         inventoryResolved: Boolean(item.inventoryResolved),
         linkInspection: item.linkInspection || null,
         graphEvidence: item.graphEvidence || null,
-        relatedUrls: Array.isArray(item.relatedUrls) ? item.relatedUrls : []
+        relatedUrls: Array.isArray(item.relatedUrls) ? item.relatedUrls : [],
+        generatedAutomatically: Boolean(item.generatedAutomatically)
       };
 
       const scored = scoreOpportunity(base, config);
