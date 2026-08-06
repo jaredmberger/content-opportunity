@@ -69,8 +69,8 @@ function renderSummary() {
   const cards = [
     ['Queue', visible.length],
     ['High priority', visible.filter(x => x.priority === 'high').length],
-    ['Accepted', all.filter(x => x.workflowStatus === 'accepted').length],
-    ['In progress', all.filter(x => x.workflowStatus === 'in-progress').length]
+    ['Create', visible.filter(x => x.type === 'create').length],
+    ['Research', visible.filter(x => x.type === 'research').length]
   ];
   els.summary.innerHTML = cards.map(([label, value]) => `<article class="summary-card panel"><strong>${esc(value)}</strong><span>${esc(label)}</span></article>`).join('');
 }
@@ -93,7 +93,7 @@ function filteredRows(includeType = true) {
     if (workflow === 'active' && !ACTIVE_STATUSES.has(item.workflowStatus || 'new')) return false;
     if (workflow !== 'all' && workflow !== 'active' && (item.workflowStatus || 'new') !== workflow) return false;
     if (query) {
-      const haystack = [item.title, item.cluster, item.type, item.recommendation, item.notes].join(' ').toLowerCase();
+      const haystack = [item.title, item.cluster, item.type, item.recommendation, item.notes, item.projectRecordEvidence?.recordId].join(' ').toLowerCase();
       if (!haystack.includes(query)) return false;
     }
     return true;
@@ -114,9 +114,32 @@ function graphEvidence(item) {
   return rows.join('');
 }
 
+function projectEvidence(item) {
+  if (!item.projectRecordEvidence) return '';
+  const p = item.projectRecordEvidence;
+  return [
+    `<div class="evidence-item"><strong>Project Record</strong>${esc(p.recordId)} · ${esc(p.recordType)}</div>`,
+    `<div class="evidence-item"><strong>Corpus relationships</strong>${esc(p.inboundRelationships)} record${p.inboundRelationships === 1 ? '' : 's'} point here</div>`,
+    `<div class="evidence-item"><strong>Evidence readiness</strong>${esc(p.attachedSources)} attached source${p.attachedSources === 1 ? '' : 's'} · ${Math.round(Number(p.confidence || 0) * 100)}% confidence</div>`,
+    `<div class="evidence-item"><strong>Canonical coverage</strong>No matching public page found</div>`
+  ].join('');
+}
+
+function searchEvidence(item) {
+  if (!item.searchIntelligenceMatch) return '';
+  const position = Number(item.averagePosition || 0);
+  const ctr = Number(item.searchCtr || 0) * 100;
+  return [
+    `<div class="evidence-item"><strong>Search impressions</strong>${esc(Math.round(item.searchImpressions || 0).toLocaleString())}</div>`,
+    `<div class="evidence-item"><strong>Average position</strong>${position ? esc(position.toFixed(1)) : '—'}</div>`,
+    `<div class="evidence-item"><strong>Search clicks / CTR</strong>${esc(Math.round(item.searchClicks || 0).toLocaleString())} · ${esc(ctr.toFixed(1))}%</div>`
+  ].join('');
+}
+
 function siteEvidence(item) {
   const rows = [];
-  if (item.generatedAutomatically) rows.push('<div class="evidence-item"><strong>Automatic discovery</strong>Generated from the CuratorOS Link Map</div>');
+  if (item.graphEvidence) rows.push('<div class="evidence-item"><strong>Automatic discovery</strong>Generated from the CuratorOS Link Map</div>');
+  else if (item.projectRecordEvidence) rows.push('<div class="evidence-item"><strong>Automatic discovery</strong>Generated from permanent Project Records</div>');
   if (item.inventoryResolved) rows.push(`<div class="evidence-item"><strong>Site inventory</strong>${item.siteInventoryMatch ? 'Existing canonical verified' : 'No canonical match found'}</div>`);
   if (item.linkInspection?.checked) rows.push(`<div class="evidence-item"><strong>Live link inspection</strong>${esc(item.linkInspection.missingCount)} of ${esc(item.linkInspection.relatedCount)} related links missing</div>`);
   return rows.join('');
@@ -126,6 +149,12 @@ function graphSuggestionDetails(item) {
   const suggestions = item.graphEvidence?.suggestions;
   if (!Array.isArray(suggestions) || !suggestions.length) return '';
   return `<details><summary>Suggested connections (${esc(suggestions.length)})</summary><div class="missing-links">${suggestions.map(s => `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)} <span>· ${esc(s.sharedNeighbors)} shared neighbor${s.sharedNeighbors === 1 ? '' : 's'}</span></a>`).join('')}</div></details>`;
+}
+
+function projectReferenceDetails(item) {
+  const refs = item.projectRecordEvidence?.referringRecordIds;
+  if (!Array.isArray(refs) || !refs.length) return '';
+  return `<details><summary>Referring Project Records (${esc(refs.length)})</summary><div class="missing-links">${refs.map(id => `<span>${esc(id)}</span>`).join('')}</div></details>`;
 }
 
 function renderResults() {
@@ -143,15 +172,18 @@ function renderResults() {
           <span class="badge">${esc(item.priority)} priority</span>
           <span class="badge">${esc(item.cluster)}</span>
           <span class="badge workflow-badge">${esc((item.workflowStatus || 'new').replace('-', ' '))}</span>
-          ${item.generatedAutomatically ? '<span class="badge">auto discovered</span>' : ''}
+          ${item.graphEvidence ? '<span class="badge">link map</span>' : ''}
+          ${item.projectRecordEvidence ? '<span class="badge">project records</span>' : ''}
+          ${item.searchIntelligenceMatch ? '<span class="badge">search intelligence</span>' : ''}
           ${item.siteInventoryMatch ? '<span class="badge">inventory verified</span>' : ''}
         </div>
         <h3>${esc(item.title)}</h3>
         <p class="recommendation">${esc(item.recommendation)}</p>
         ${item.canonicalUrl ? `<p class="url-line"><a href="${esc(item.canonicalUrl)}" target="_blank" rel="noopener">Open existing page ↗</a></p>` : ''}
         ${item.unresolvedQuestions?.length ? `<p><strong>Open questions:</strong> ${item.unresolvedQuestions.map(esc).join(' · ')}</p>` : ''}
-        <div class="evidence">${siteEvidence(item)}${graphEvidence(item)}${(item.evidence || []).slice(0, 5).map(e => `<div class="evidence-item"><strong>${esc(e.label)}</strong>+${esc(e.contribution)} points</div>`).join('')}</div>
+        <div class="evidence">${siteEvidence(item)}${graphEvidence(item)}${projectEvidence(item)}${searchEvidence(item)}${(item.evidence || []).slice(0, 5).map(e => `<div class="evidence-item"><strong>${esc(e.label)}</strong>+${esc(e.contribution)} points</div>`).join('')}</div>
         ${graphSuggestionDetails(item)}
+        ${projectReferenceDetails(item)}
         ${item.linkInspection?.missingUrls?.length ? `<details><summary>Missing link targets (${esc(item.linkInspection.missingUrls.length)})</summary><div class="missing-links">${item.linkInspection.missingUrls.map(url => `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(url)}</a>`).join('')}</div></details>` : ''}
       </div>
       <div class="score"><strong>${esc(item.score)}</strong><span>Opportunity score</span></div>
@@ -180,7 +212,8 @@ function topicHaystack(item) {
   const suggestions = Array.isArray(item.graphEvidence?.suggestions)
     ? item.graphEvidence.suggestions.flatMap(s => [s.title, s.url])
     : [];
-  return [item.title, item.canonicalUrl, item.cluster, item.type, ...suggestions].filter(Boolean).join(' ').toLowerCase();
+  const refs = Array.isArray(item.projectRecordEvidence?.referringRecordIds) ? item.projectRecordEvidence.referringRecordIds : [];
+  return [item.title, item.canonicalUrl, item.cluster, item.type, item.projectRecordEvidence?.recordId, ...suggestions, ...refs].filter(Boolean).join(' ').toLowerCase();
 }
 
 async function saveWorkflow(event) {
@@ -224,13 +257,19 @@ async function fetchAutomaticData() {
 
 async function discoverAutomatically() {
   els.discover.disabled = true;
-  els.discover.textContent = 'Inspecting CuratorOS Link Map…';
-  els.discoveryMeta.textContent = 'Reading the current graph and generating high-confidence relationship gaps…';
+  els.discover.textContent = 'Inspecting CuratorOS intelligence…';
+  els.discoveryMeta.textContent = 'Reading Link Map, Project Records, site inventory, and search evidence…';
   try {
     const data = await fetchAutomaticData();
     acceptResults(data);
     const graph = data.graph || {};
-    els.discoveryMeta.textContent = `Analyzed ${graph.pages ?? 0} pages and ${graph.edges ?? 0} internal links · ${data.opportunities?.length ?? 0} opportunities surfaced.`;
+    const project = data.projectRecords || {};
+    const search = data.searchIntelligence || {};
+    const projectText = project.used
+      ? `${project.records ?? 0} Project Records (${project.mode})`
+      : `Project Records unavailable${project.liveError ? ' · fallback not yet seeded' : ''}`;
+    const searchText = search.used ? `Search Intelligence ${search.mode}` : 'no search feed';
+    els.discoveryMeta.textContent = `Analyzed ${graph.pages ?? 0} pages · ${graph.edges ?? 0} links · ${projectText} · ${searchText} · ${data.opportunities?.length ?? 0} opportunities surfaced.`;
   } catch (error) {
     els.results.innerHTML = `<div class="empty panel">${esc(error.message)}</div>`;
     els.discoveryMeta.textContent = 'Automatic discovery could not complete.';
@@ -249,14 +288,14 @@ async function analyzeTopic() {
   }
   els.analyzeTopic.disabled = true;
   els.analyzeTopic.textContent = 'Analyzing…';
-  els.topicMeta.textContent = `Finding graph opportunities related to “${els.topicInput.value.trim()}”…`;
+  els.topicMeta.textContent = `Finding CuratorOS opportunities related to “${els.topicInput.value.trim()}”…`;
   try {
     const data = await fetchAutomaticData();
     const matches = (data.opportunities || []).filter(item => topicHaystack(item).includes(query));
     acceptResults({ ...data, opportunities: matches });
     els.topicMeta.textContent = matches.length
       ? `${matches.length} opportunity${matches.length === 1 ? '' : 'ies'} found around “${els.topicInput.value.trim()}”.`
-      : `No high-confidence Link Map opportunities currently match “${els.topicInput.value.trim()}”.`;
+      : `No high-confidence opportunities currently match “${els.topicInput.value.trim()}”.`;
   } catch (error) {
     els.results.innerHTML = `<div class="empty panel">${esc(error.message)}</div>`;
     els.topicMeta.textContent = 'Focused discovery could not complete.';
