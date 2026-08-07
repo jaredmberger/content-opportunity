@@ -2,6 +2,8 @@ const OUTCOME_ENDPOINT='https://search-intelligence.oceanliners.net/api/outcomes
 const TRACKED_STATUSES=new Set(['accepted','in-progress','completed']);
 let opportunityCache=null;
 let opportunityCacheAt=0;
+let outcomeCache=null;
+let outcomeCacheAt=0;
 
 function outcomeStatus(workflowStatus){
   if(workflowStatus==='accepted')return'planned';
@@ -17,6 +19,16 @@ async function loadOpportunities(){
   opportunityCache=new Map((data.opportunities||[]).map(item=>[String(item.id),item]));
   opportunityCacheAt=Date.now();
   return opportunityCache;
+}
+
+async function loadExistingOutcomes(){
+  if(outcomeCache&&Date.now()-outcomeCacheAt<60*1000)return outcomeCache;
+  const response=await fetch(OUTCOME_ENDPOINT,{cache:'no-store'});
+  if(!response.ok)throw new Error(`Outcome lookup returned ${response.status}`);
+  const data=await response.json();
+  outcomeCache=new Map((data.records||[]).map(record=>[String(record.id),record]));
+  outcomeCacheAt=Date.now();
+  return outcomeCache;
 }
 
 function baselineFor(item){
@@ -54,11 +66,13 @@ async function recordOutcome(card,status,button){
   const id=card?.dataset?.id;
   if(!id)return;
   try{
-    const items=await loadOpportunities();
+    const [items,outcomes]=await Promise.all([loadOpportunities(),loadExistingOutcomes()]);
     const item=items.get(id);
     if(!item?.canonicalUrl)return;
+    const outcomeId=`content-opportunity-${id}`;
+    const existing=outcomes.get(outcomeId)||null;
     const payload={
-      id:`content-opportunity-${id}`,
+      id:outcomeId,
       page:item.canonicalUrl,
       recommendation:item.recommendation||'',
       status:outcomeStatus(status),
@@ -68,9 +82,9 @@ async function recordOutcome(card,status,button){
       source:'Content Opportunity Finder',
       opportunityId:id,
       opportunityType:item.type||'',
-      signalLanes:Array.isArray(item.prioritization?.signalLanes)?item.prioritization.signalLanes:[],
-      baseline:baselineFor(item)
+      signalLanes:Array.isArray(item.prioritization?.signalLanes)?item.prioritization.signalLanes:[]
     };
+    if(!existing?.baseline)payload.baseline=baselineFor(item);
     const response=await fetch(OUTCOME_ENDPOINT,{
       method:'POST',
       headers:{'content-type':'application/json'},
@@ -79,6 +93,7 @@ async function recordOutcome(card,status,button){
     });
     const data=await response.json().catch(()=>({}));
     if(!response.ok||data?.ok===false)throw new Error(data?.error||`Outcome endpoint returned ${response.status}`);
+    if(data.record){outcomes.set(outcomeId,data.record);outcomeCache=outcomes;outcomeCacheAt=Date.now();}
     card.dataset.outcomeTracked='true';
     let note=card.querySelector('.outcome-tracking-note');
     if(!note){
@@ -87,7 +102,7 @@ async function recordOutcome(card,status,button){
       note.style.cssText='display:inline-block;margin-left:8px;font-size:.72rem;color:var(--muted,#b7b6ad)';
       button?.insertAdjacentElement('afterend',note);
     }
-    note.textContent=payload.status==='implemented'?'Outcome baseline recorded · implementation tracked':'Outcome baseline recorded · planned';
+    note.textContent=payload.status==='implemented'?'Original baseline preserved · implementation tracked':'Outcome baseline recorded · planned';
   }catch(error){
     console.warn('Content Opportunity outcome tracking skipped:',error);
   }
