@@ -8,7 +8,7 @@ import { fetchProjectRecords, normalizeProjectRecords, generateEntityOpportuniti
 import { makeDiscoverySnapshot, compareDiscovery, reconciliationSummary } from './src/reconciliation.js';
 import { buildFeedbackProfile, applyFeedbackAdjustments, FEEDBACK_STATUSES } from './src/feedback.js';
 
-const APP_VERSION='0.12.0';
+const APP_VERSION='0.12.1';
 const json=(data,init={})=>new Response(JSON.stringify(data,null,2),{...init,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store',...(init.headers||{})}});
 const corsHeaders={'access-control-allow-origin':'*','access-control-allow-methods':'GET,POST,PUT,OPTIONS','access-control-allow-headers':'Content-Type'};
 const WORKFLOW_STATUSES=new Set(['new','reviewed','accepted','in-progress','completed','deferred','dismissed']);
@@ -21,6 +21,7 @@ const SEARCH_INTELLIGENCE_KEY='content-opportunity:search-intelligence:v1';
 const PROJECT_RECORDS_KEY='content-opportunity:project-records:v1';
 const DISCOVERY_SNAPSHOT_KEY='content-opportunity:discovery-snapshot:v1';
 const DEFAULT_SEARCH_INTELLIGENCE_URL='https://search-intelligence.oceanliners.net/api/curator-intelligence';
+const DEFAULT_VERIFICATION_URL='https://search-intelligence.oceanliners.net/api/outcomes?verify=1';
 
 async function readKvJson(env,key){if(!env.OPPORTUNITY_STATE)return null;return env.OPPORTUNITY_STATE.get(key,{type:'json'});}
 async function writeKvJson(env,key,value){if(!env.OPPORTUNITY_STATE)return false;await env.OPPORTUNITY_STATE.put(key,JSON.stringify(value));return true;}
@@ -65,6 +66,18 @@ async function resolveProjectRecords(env,{preferLive=true}={}){
   if(preferLive){try{const payload=await fetchProjectRecords(endpoint);const snapshot=normalizeProjectRecords(payload,endpoint);await writeProjectRecords(env,snapshot).catch(()=>false);return{snapshot,mode:'live',endpoint,fallback:false}}catch(error){const saved=await readProjectRecords(env).catch(()=>null);if(saved)return{snapshot:saved,mode:'kv-fallback',endpoint,fallback:true,liveError:error?.message||String(error)};return{snapshot:null,mode:'unavailable',endpoint,fallback:false,liveError:error?.message||String(error)}}}
   const saved=await readProjectRecords(env).catch(()=>null);return{snapshot:saved,mode:saved?'kv':'unavailable',endpoint,fallback:false};
 }
+async function fetchVerification(env){
+  const endpoint=env.VERIFICATION_URL||DEFAULT_VERIFICATION_URL;
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),15000);
+  try{
+    const response=await fetch(endpoint,{headers:{accept:'application/json','user-agent':`CuratorOS-Content-Opportunity/${APP_VERSION} (+https://content.oceanliners.net)`},cache:'no-store',signal:controller.signal});
+    const text=await response.text();let payload;
+    try{payload=text?JSON.parse(text):{}}catch{throw new Error(`Verification source returned non-JSON HTTP ${response.status}: ${text.slice(0,120)}`)}
+    if(!response.ok||payload?.ok===false)throw new Error(payload?.error||`Verification source returned HTTP ${response.status}`);
+    return{...payload,proxiedBy:'content-opportunity',upstream:endpoint};
+  }catch(error){if(error?.name==='AbortError')throw new Error('Verification source timed out.');throw error;}finally{clearTimeout(timer);}
+}
 async function attachWorkflow(env,opportunities){if(!env.OPPORTUNITY_STATE)return opportunities;await Promise.all(opportunities.map(async item=>{const saved=await readWorkflow(env,item.id).catch(()=>null);if(!saved)return;item.workflowStatus=saved.workflowStatus||item.workflowStatus;item.notes=saved.notes||'';item.updatedAt=saved.updatedAt||null;item.reconciliation=saved.reconciliation||null;}));return opportunities;}
 async function reconcileWorkflow(env,opportunities,evaluatedLanes){
   if(!env.OPPORTUNITY_STATE)return{enabled:false,...reconciliationSummary()};
@@ -81,9 +94,13 @@ export default{async fetch(request,env){
 
   if(url.pathname==='/api/health'){
     const[searchSnapshot,projectSnapshot,discoverySnapshot,feedback]=await Promise.all([readSearchIntelligence(env).catch(()=>null),readProjectRecords(env).catch(()=>null),readDiscoverySnapshot(env).catch(()=>null),feedbackProfile(env)]);
-    return json({ok:true,service:env.APP_NAME||'CuratorOS Content Opportunity Finder',version:APP_VERSION,siteOrigin,scoringVersion:scoringConfig.version,workflowPersistence:env.OPPORTUNITY_STATE?'kv':'browser',siteInventory:'live-index',automaticSiteEnrichment:true,linkGapInspection:true,automaticGraphDiscovery:true,automaticEntityDiscovery:true,lifecycleReconciliation:Boolean(env.OPPORTUNITY_STATE),feedbackLearning:{enabled:Boolean(env.OPPORTUNITY_STATE),decisions:feedback.decisions,maximumAdjustment:feedback.maximumAdjustment},lastDiscoveryAt:discoverySnapshot?.generatedAt||null,linkMapSource:DEFAULT_GRAPH_URL,searchIntelligenceEndpoint:env.SEARCH_INTELLIGENCE_URL||DEFAULT_SEARCH_INTELLIGENCE_URL,projectRecordsEndpoint:env.PROJECT_RECORDS_URL||DEFAULT_PROJECT_RECORDS_URL,searchIntelligenceFallback:searchSnapshot?{available:true,importedAt:searchSnapshot.importedAt||null,pageCount:searchSnapshot.pageCount||0}:{available:false},projectRecordsFallback:projectSnapshot?{available:true,importedAt:projectSnapshot.importedAt||null,recordCount:projectSnapshot.recordCount||0,version:projectSnapshot.version||0}:{available:false}},{headers:corsHeaders});
+    return json({ok:true,service:env.APP_NAME||'CuratorOS Content Opportunity Finder',version:APP_VERSION,siteOrigin,scoringVersion:scoringConfig.version,workflowPersistence:env.OPPORTUNITY_STATE?'kv':'browser',siteInventory:'live-index',automaticSiteEnrichment:true,linkGapInspection:true,automaticGraphDiscovery:true,automaticEntityDiscovery:true,lifecycleReconciliation:Boolean(env.OPPORTUNITY_STATE),feedbackLearning:{enabled:Boolean(env.OPPORTUNITY_STATE),decisions:feedback.decisions,maximumAdjustment:feedback.maximumAdjustment},verificationEndpoint:'/api/verification',lastDiscoveryAt:discoverySnapshot?.generatedAt||null,linkMapSource:DEFAULT_GRAPH_URL,searchIntelligenceEndpoint:env.SEARCH_INTELLIGENCE_URL||DEFAULT_SEARCH_INTELLIGENCE_URL,projectRecordsEndpoint:env.PROJECT_RECORDS_URL||DEFAULT_PROJECT_RECORDS_URL,searchIntelligenceFallback:searchSnapshot?{available:true,importedAt:searchSnapshot.importedAt||null,pageCount:searchSnapshot.pageCount||0}:{available:false},projectRecordsFallback:projectSnapshot?{available:true,importedAt:projectSnapshot.importedAt||null,recordCount:projectSnapshot.recordCount||0,version:projectSnapshot.version||0}:{available:false}},{headers:corsHeaders});
   }
   if(url.pathname==='/api/config'&&request.method==='GET')return json({...scoringConfig,workflowStatuses:[...WORKFLOW_STATUSES]},{headers:corsHeaders});
+  if(url.pathname==='/api/verification'&&request.method==='GET'){
+    try{return json(await fetchVerification(env),{headers:corsHeaders});}
+    catch(error){return json({ok:false,error:'Verification is unavailable',detail:error?.message||String(error)},{status:502,headers:corsHeaders});}
+  }
   if(url.pathname==='/api/feedback'){
     if(request.method==='GET')return json({ok:true,profile:await feedbackProfile(env),records:await readFeedbackRecords(env).catch(()=>[])},{headers:corsHeaders});
     if(request.method==='POST'){
