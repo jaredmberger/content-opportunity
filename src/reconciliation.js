@@ -7,14 +7,19 @@ const laneFor = item => {
 export function makeDiscoverySnapshot(opportunities = []) {
   return {
     format: 'curatoros-content-opportunity-discovery',
-    formatVersion: 1,
+    formatVersion: 2,
     generatedAt: new Date().toISOString(),
     items: opportunities.map(item => ({
       id: item.id,
       title: item.title,
       type: item.type,
       lane: laneFor(item),
-      score: item.score,
+      score: Number(item.score || 0),
+      decisionScore: Number(item.decisionScore ?? item.score ?? 0),
+      workNextRank: Number(item.workNextRank || 0),
+      feedbackAdjustment: Number(item.feedbackAdjustment || 0),
+      signalLanes: Array.isArray(item.prioritization?.signalLanes) ? item.prioritization.signalLanes : [],
+      independentSignals: Number(item.prioritization?.independentSignals || 0),
       canonicalUrl: item.canonicalUrl || null
     }))
   };
