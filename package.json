@@ -1,6 +1,6 @@
 {
   "name": "content-opportunity",
-  "version": "0.12.0",
+  "version": "0.12.1",
   "private": true,
   "description": "CuratorOS Content Opportunity Finder — explainable editorial opportunity discovery for oceanliners.net.",
   "type": "module",
