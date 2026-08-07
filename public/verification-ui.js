@@ -1,4 +1,4 @@
-const VERIFICATION_ENDPOINT='https://search-intelligence.oceanliners.net/api/outcomes?verify=1';
+const VERIFICATION_ENDPOINT='/api/verification';
 
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const signed=(value,digits=0)=>{const n=Number(value||0);return`${n>0?'+':''}${n.toFixed(digits)}`};
@@ -33,7 +33,7 @@ async function loadVerification(){
   try{
     const response=await fetch(VERIFICATION_ENDPOINT,{cache:'no-store'});
     const data=await response.json().catch(()=>({}));
-    if(!response.ok||data?.ok===false)throw new Error(data?.error||`Verification endpoint returned ${response.status}`);
+    if(!response.ok||data?.ok===false)throw new Error(data?.detail||data?.error||`Verification endpoint returned ${response.status}`);
     renderSummary(summary,data.summary||{});
     renderList(list,data.records||[],data.sources||{});
   }catch(error){
