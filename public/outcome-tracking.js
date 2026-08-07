@@ -37,7 +37,7 @@ function baselineFor(item){
     search:{
       clicks:Number(item.searchClicks||0),
       impressions:Number(item.searchImpressions||0),
-      ctr:Number(item.searchCtr||0),
+      ctr:Number(item.searchCtr||0)*100,
       averagePosition:Number(item.averagePosition||0),
       queryCount:Number(item.searchQueryCount||0)
     },
