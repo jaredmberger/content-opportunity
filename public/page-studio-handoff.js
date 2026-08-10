@@ -1,23 +1,10 @@
 (() => {
-  'use strict';
-  const STUDIO='https://page-studio.oceanliners.net/';
-  const eligible=item=>['accepted','in-progress'].includes(item.workflowStatus||'new')&&['expand','connect'].includes(String(item.type||item.opportunityType||'').toLowerCase())&&Boolean(item.canonicalUrl);
-  function studioUrl(item){
-    let page;try{page=new URL(item.canonicalUrl,'https://www.oceanliners.net')}catch{return''}
-    if(!['oceanliners.net','www.oceanliners.net'].includes(page.hostname.toLowerCase()))return'';
-    const q=new URLSearchParams({source:'content-opportunity',url:page.href,opportunity_id:item.id||'',opportunity_type:item.type||item.opportunityType||'',finding_title:item.title||'Content Opportunity',finding_category:`${String(item.type||item.opportunityType||'').toUpperCase()} opportunity`,recommendation:item.recommendation||'',rationale:item.rationale||'',notes:item.notes||''});
-    return `${STUDIO}?${q}`;
-  }
-  function inject(){
-    const items=window.__CONTENT_OPPORTUNITY_ITEMS__||[];
-    document.querySelectorAll('.opportunity[data-id]').forEach(card=>{
-      if(card.querySelector('.page-studio-handoff'))return;
-      const item=items.find(x=>String(x.id)===String(card.dataset.id));if(!item||!eligible(item))return;
-      const href=studioUrl(item);if(!href)return;
-      const editor=card.querySelector('.workflow-editor');if(!editor)return;
-      const a=document.createElement('a');a.className='page-studio-handoff secondary';a.href=href;a.textContent='Open in Page Studio →';a.setAttribute('aria-label',`Open ${item.title||'this opportunity'} in Page Studio`);editor.appendChild(a);
-    });
-  }
-  window.addEventListener('content-opportunity:render',inject);
-  window.addEventListener('load',()=>setTimeout(inject,1200));
+'use strict';const STUDIO='https://page-studio.oceanliners.net/';
+const typeOf=i=>String(i.type||i.opportunityType||'').toLowerCase();
+const eligible=i=>['accepted','in-progress'].includes(i.workflowStatus||'new')&&['create','expand','connect'].includes(typeOf(i));
+const slug=s=>String(s||'new-page').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,80)||'new-page';
+function target(i){const type=typeOf(i);if(type==='create'&&!i.canonicalUrl){const suggested=i.suggestedPath||i.proposedPath||`/${slug(i.title)}`;return new URL(suggested,'https://www.oceanliners.net').href}try{return new URL(i.canonicalUrl,'https://www.oceanliners.net').href}catch{return''}}
+function studioUrl(i){const page=target(i);if(!page)return'';const u=new URL(page);if(!['oceanliners.net','www.oceanliners.net'].includes(u.hostname.toLowerCase()))return'';const type=typeOf(i),q=new URLSearchParams({source:'content-opportunity',mode:type==='create'?'create':'edit',url:u.href,opportunity_id:i.id||'',opportunity_type:type,finding_title:i.title||'Content Opportunity',finding_category:`${type.toUpperCase()} opportunity`,recommendation:i.recommendation||'',rationale:i.rationale||'',notes:i.notes||'',cluster:i.cluster||'',template_hint:i.templateHint||i.pageType||'',suggested_path:u.pathname});return `${STUDIO}?${q}`}
+function inject(){const items=window.__CONTENT_OPPORTUNITY_ITEMS__||[];document.querySelectorAll('.opportunity[data-id]').forEach(card=>{if(card.querySelector('.page-studio-handoff'))return;const i=items.find(x=>String(x.id)===String(card.dataset.id));if(!i||!eligible(i))return;const href=studioUrl(i);if(!href)return;const editor=card.querySelector('.workflow-editor');if(!editor)return;const a=document.createElement('a');a.className='page-studio-handoff secondary';a.href=href;a.textContent=typeOf(i)==='create'?'Create in Page Studio →':'Open in Page Studio →';editor.appendChild(a)})}
+window.addEventListener('content-opportunity:render',inject);window.addEventListener('load',()=>setTimeout(inject,1200));
 })();
