@@ -3,6 +3,8 @@
 
   const CHECKPOINTS = [7, 14, 28];
   const PREFIX = '--- CuratorOS verification checkpoint D';
+  const PRODUCTION_MARKER = '--- Page Studio production receipt ---';
+  const MAX_NOTES = 5000;
   const normalized = (value = '') => {
     try {
       const url = new URL(String(value), 'https://oceanliners.net');
@@ -81,6 +83,27 @@
     return lines.join('\n');
   }
 
+  function appendPreservingProduction(existing, receipt) {
+    const original = String(existing || '').trim();
+    let combined = `${original}\n\n${receipt}`.trim();
+    if (combined.length <= MAX_NOTES) return combined;
+
+    const criticalIndex = original.indexOf(PRODUCTION_MARKER);
+    if (criticalIndex >= 0) {
+      const critical = original.slice(criticalIndex).trim();
+      const room = Math.max(0, MAX_NOTES - critical.length - receipt.length - 6);
+      const editorial = original.slice(0, criticalIndex).trim();
+      const retainedEditorial = room > 0 ? editorial.slice(Math.max(0, editorial.length - room)) : '';
+      combined = [retainedEditorial, critical, receipt].filter(Boolean).join('\n\n');
+    }
+
+    if (combined.length > MAX_NOTES) {
+      const markerIndex = combined.indexOf(PRODUCTION_MARKER);
+      if (markerIndex >= 0) combined = combined.slice(markerIndex);
+    }
+    return combined.slice(0, MAX_NOTES);
+  }
+
   async function save(item, day) {
     const start = productionStart(item.notes);
     if (!start) return;
@@ -92,7 +115,7 @@
     const payload = JSON.stringify({ schemaVersion:1, checkpointDay:day, productionStart:start, observedAt, actualAge, canonicalPath:path, search, analytics });
     const fingerprint = await sha256(payload);
     const receipt = checkpointText(day, start, path, observedAt, actualAge, search, analytics, fingerprint);
-    const notes = `${String(item.notes || '').trim()}\n\n${receipt}`.trim().slice(0, 5000);
+    const notes = appendPreservingProduction(item.notes, receipt);
     const response = await fetch(`/api/workflow/${encodeURIComponent(item.id)}`, {
       method:'PUT', headers:{ 'content-type':'application/json', accept:'application/json' },
       body:JSON.stringify({ workflowStatus:item.workflowStatus || 'completed', notes })
