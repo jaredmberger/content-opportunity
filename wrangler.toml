@@ -1,6 +1,9 @@
 name = "content-opportunity"
-main = "worker.js"
+main = "src/entry-v0.14.js"
 compatibility_date = "2026-08-01"
+
+[build]
+command = "node scripts/write-build-meta.mjs"
 
 [assets]
 directory = "./public"
@@ -9,6 +12,9 @@ binding = "ASSETS"
 [[kv_namespaces]]
 binding = "OPPORTUNITY_STATE"
 id = "afce711ea6844278b0d7fe059c739be2"
+
+[version_metadata]
+binding = "CF_VERSION_METADATA"
 
 [vars]
 SITE_ORIGIN = "https://www.oceanliners.net"
