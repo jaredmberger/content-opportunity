@@ -107,7 +107,15 @@ If an opportunity that CuratorOS itself auto-completed later appears again, it i
 
 A manual workflow save clears the automatic-reconciliation marker, returning authority to the curator.
 
+## Disaster recovery
+
+The complete `OPPORTUNITY_STATE` namespace can be exported through the authenticated `GET /api/recovery-export` endpoint. Configure the Cloudflare Worker secret `RECOVERY_EXPORT_TOKEN`; the endpoint remains disabled when the secret is absent. See [`RECOVERY_EXPORT.md`](RECOVERY_EXPORT.md) for backup, validation, and iPad/Shortcut instructions.
+
 ## API
+
+### `GET /api/recovery-export`
+
+Authenticated full-KV recovery export. Requires `X-Curator-Recovery-Key` matching the `RECOVERY_EXPORT_TOKEN` Worker secret.
 
 ### `GET /api/health`
 

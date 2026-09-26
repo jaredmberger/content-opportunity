@@ -25,6 +25,90 @@ const INTELLIGENCE_CANDIDATES_KEY='content-opportunity:intelligence-candidates:v
 const DEFAULT_SEARCH_INTELLIGENCE_URL='https://search-intelligence.oceanliners.net/api/curator-intelligence';
 const DEFAULT_VERIFICATION_URL='https://search-intelligence.oceanliners.net/api/outcomes?verify=1';
 
+
+async function requireRecoveryExportToken(request,env){
+  if(!env.RECOVERY_EXPORT_TOKEN)return json({ok:false,error:'Recovery export is disabled because RECOVERY_EXPORT_TOKEN is not configured.'},{status:503,headers:corsHeaders});
+  const supplied=request.headers.get('x-curator-recovery-key');
+  if(supplied===env.RECOVERY_EXPORT_TOKEN)return null;
+  return json({ok:false,error:'Unauthorized recovery export request.'},{status:401,headers:corsHeaders});
+}
+
+async function listAllOpportunityState(env){
+  if(!env.OPPORTUNITY_STATE)throw new Error('OPPORTUNITY_STATE is not configured.');
+  const entries=[];
+  let cursor;
+  do{
+    const page=await env.OPPORTUNITY_STATE.list({limit:1000,...(cursor?{cursor}:{})});
+    for(const item of page.keys){
+      const raw=await env.OPPORTUNITY_STATE.get(item.name,{type:'text'});
+      if(raw===null)throw new Error(`Listed KV key disappeared during export: ${item.name}`);
+      entries.push({key:item.name,value:raw});
+    }
+    cursor=page.list_complete?undefined:page.cursor;
+  }while(cursor);
+  entries.sort((a,b)=>a.key.localeCompare(b.key));
+  return entries;
+}
+
+async function sha256Text(value){
+  const bytes=new TextEncoder().encode(value);
+  const digest=await crypto.subtle.digest('SHA-256',bytes);
+  return Array.from(new Uint8Array(digest),byte=>byte.toString(16).padStart(2,'0')).join('');
+}
+
+function summarizeOpportunityState(entries){
+  const counts={workflow:0,feedback:0,searchIntelligence:0,projectRecords:0,discoverySnapshot:0,intelligenceCandidates:0,other:0};
+  for(const entry of entries){
+    const key=entry.key;
+    if(key.startsWith('content-opportunity:workflow:'))counts.workflow+=1;
+    else if(key.startsWith('content-opportunity:feedback:'))counts.feedback+=1;
+    else if(key===SEARCH_INTELLIGENCE_KEY)counts.searchIntelligence+=1;
+    else if(key===PROJECT_RECORDS_KEY)counts.projectRecords+=1;
+    else if(key===DISCOVERY_SNAPSHOT_KEY)counts.discoverySnapshot+=1;
+    else if(key===INTELLIGENCE_CANDIDATES_KEY)counts.intelligenceCandidates+=1;
+    else counts.other+=1;
+  }
+  return counts;
+}
+
+async function opportunityRecoveryExport(env){
+  if(!env.OPPORTUNITY_STATE)return json({ok:false,error:'OPPORTUNITY_STATE is not configured.'},{status:500,headers:corsHeaders});
+  try{
+    const entries=await listAllOpportunityState(env);
+    const data={entries};
+    const exportedAt=new Date().toISOString();
+    const dataSha256=await sha256Text(JSON.stringify(data));
+    const payload={
+      format:'content-opportunity-kv-recovery',
+      schemaVersion:1,
+      exportedAt,
+      source:{
+        service:'CuratorOS Content Opportunity Finder',
+        binding:'OPPORTUNITY_STATE',
+        namespaceId:'afce711ea6844278b0d7fe059c739be2'
+      },
+      integrity:{algorithm:'SHA-256',dataSha256},
+      summary:{
+        keyCount:entries.length,
+        categories:summarizeOpportunityState(entries)
+      },
+      data
+    };
+    const stamp=exportedAt.replace(/[:.]/g,'-');
+    return new Response(JSON.stringify(payload,null,2),{
+      status:200,
+      headers:{
+        'content-type':'application/json; charset=utf-8',
+        'content-disposition':`attachment; filename="content-opportunity-recovery-${stamp}.json"`,
+        'cache-control':'no-store',
+        'x-content-type-options':'nosniff'
+      }
+    });
+  }catch(error){
+    return json({ok:false,error:'Recovery export failed.',detail:error?.message||String(error)},{status:500,headers:corsHeaders});
+  }
+}
+
 async function readKvJson(env,key){if(!env.OPPORTUNITY_STATE)return null;return env.OPPORTUNITY_STATE.get(key,{type:'json'});}
 async function writeKvJson(env,key,value){if(!env.OPPORTUNITY_STATE)return false;await env.OPPORTUNITY_STATE.put(key,JSON.stringify(value));return true;}
 const readWorkflow=(env,id)=>readKvJson(env,workflowKey(id));
@@ -60,6 +144,12 @@ function sourceDiagnostics({graphResult,inventoryResult,searchResolved,projectRe
 
 export default{async fetch(request,env){
   const url=new URL(request.url);const siteOrigin=env.SITE_ORIGIN||'https://www.oceanliners.net';if(request.method==='OPTIONS')return new Response(null,{status:204,headers:corsHeaders});
+
+  if(url.pathname==='/api/recovery-export'&&request.method==='GET'){
+    const authError=await requireRecoveryExportToken(request,env);
+    if(authError)return authError;
+    return opportunityRecoveryExport(env);
+  }
   if(url.pathname==='/api/health'){const[searchSnapshot,projectSnapshot,discoverySnapshot,feedback,intelligence]=await Promise.all([readSearchIntelligence(env).catch(()=>null),readProjectRecords(env).catch(()=>null),readDiscoverySnapshot(env).catch(()=>null),feedbackProfile(env),readIntelligenceCandidates(env).catch(()=>null)]);return json({ok:true,service:env.APP_NAME||'CuratorOS Content Opportunity Finder',version:APP_VERSION,siteOrigin,scoringVersion:scoringConfig.version,workflowPersistence:env.OPPORTUNITY_STATE?'kv':'browser',siteInventory:'live-index',automaticSiteEnrichment:true,linkGapInspection:true,automaticGraphDiscovery:true,automaticEntityDiscovery:true,lifecycleReconciliation:Boolean(env.OPPORTUNITY_STATE),feedbackLearning:{enabled:Boolean(env.OPPORTUNITY_STATE),decisions:feedback.decisions,maximumAdjustment:feedback.maximumAdjustment},intelligencePromotion:{enabled:Boolean(env.OPPORTUNITY_STATE),candidateCount:intelligence?.candidates?.length||0,receivedAt:intelligence?.receivedAt||null},verificationEndpoint:'/api/verification',lastDiscoveryAt:discoverySnapshot?.generatedAt||null,linkMapSource:DEFAULT_GRAPH_URL,searchIntelligenceEndpoint:env.SEARCH_INTELLIGENCE_URL||DEFAULT_SEARCH_INTELLIGENCE_URL,projectRecordsEndpoint:env.PROJECT_RECORDS_URL||DEFAULT_PROJECT_RECORDS_URL},{headers:corsHeaders});}
   if(url.pathname==='/api/config'&&request.method==='GET')return json({...scoringConfig,workflowStatuses:[...WORKFLOW_STATUSES]},{headers:corsHeaders});
   if(url.pathname==='/api/intelligence-candidates'){
