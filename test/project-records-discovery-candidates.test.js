@@ -69,3 +69,45 @@ test('discovery candidates disappear once the canonical page exists', () => {
 
   assert.equal(result.length, 0);
 });
+
+
+test('explicit discovery candidates survive the automatic opportunity cap', () => {
+  const ordinary = Array.from({ length: 100 }, (_, index) => ({
+    id: `ship:auto-${index}`,
+    title: `SS Automatic ${index}`,
+    type: 'ship',
+    data: {},
+    sources: []
+  }));
+  const refA = {
+    id: 'note:ref-a',
+    title: 'Reference A',
+    type: 'note',
+    relationships: ordinary.map(record => ({ target: record.id }))
+  };
+  const refB = {
+    id: 'note:ref-b',
+    title: 'Reference B',
+    type: 'note',
+    relationships: ordinary.map(record => ({ target: record.id }))
+  };
+  const nomination = {
+    id: 'ship:curator-nomination',
+    title: 'SS Curator Nomination',
+    type: 'ship',
+    status: 'draft',
+    data: {},
+    sources: [],
+    metadata: { discoveryCandidate: true }
+  };
+
+  const result = generateEntityOpportunities(
+    snapshot([...ordinary, refA, refB, nomination]),
+    { pages: [] },
+    { maxOpportunities: 80 }
+  );
+
+  assert.equal(result.length, 80);
+  assert.ok(result.some(item => item.title === 'SS Curator Nomination'));
+  assert.equal(result.filter(item => item.projectRecordEvidence.discoveryCandidate).length, 1);
+});

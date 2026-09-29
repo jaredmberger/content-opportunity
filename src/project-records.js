@@ -188,9 +188,18 @@ export function generateEntityOpportunities(snapshot, inventory, options = {}) {
     });
   }
 
-  return candidates
-    .sort((a, b) => b.entityMentions - a.entityMentions || b.editorialImportance - a.editorialImportance || a.title.localeCompare(b.title))
-    .slice(0, maxOpportunities);
+  const nominated = candidates
+    .filter(item => item.projectRecordEvidence?.discoveryCandidate === true)
+    .sort((a, b) => b.editorialImportance - a.editorialImportance || b.entityMentions - a.entityMentions || a.title.localeCompare(b.title));
+  const automatic = candidates
+    .filter(item => item.projectRecordEvidence?.discoveryCandidate !== true)
+    .sort((a, b) => b.entityMentions - a.entityMentions || b.editorialImportance - a.editorialImportance || a.title.localeCompare(b.title));
+
+  // Explicit curator nominations are authoritative editorial input, not merely
+  // another automatically inferred candidate. Never discard them because the
+  // automatic opportunity list hit its size cap.
+  const automaticLimit = Math.max(0, maxOpportunities - nominated.length);
+  return [...nominated, ...automatic.slice(0, automaticLimit)];
 }
 
 export { DEFAULT_PROJECT_RECORDS_URL };
