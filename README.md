@@ -36,6 +36,21 @@ https://curator.oceanliners.net/api/project-records
 
 Content Opportunity Finder prefers each live source and refreshes a KV fallback snapshot after successful reads.
 
+### CuratorOS Access authentication
+
+The Project Records endpoint lives behind Cloudflare Access. Production live reads therefore require a Cloudflare Access service token that is allowed by the CuratorOS Access application.
+
+Store the token values as Worker secrets:
+
+```text
+PROJECT_RECORDS_ACCESS_CLIENT_ID
+PROJECT_RECORDS_ACCESS_CLIENT_SECRET
+```
+
+The Worker sends them only as the standard `CF-Access-Client-Id` and `CF-Access-Client-Secret` request headers when both values are configured. Project Records reads use `no-store` so a newly saved discovery candidate can enter the next discovery run immediately.
+
+If live authentication fails, Content Opportunity still uses its last KV snapshot, but discovery diagnostics report `projectRecords.mode = "kv-fallback"`, the live-read error, snapshot version, update time, and record count. The UI also labels whether the current run used **Project Records live** or a fallback snapshot.
+
 ## Cloudflare KV
 
 The Worker uses:
