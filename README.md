@@ -223,3 +223,7 @@ KV Search snapshot fallback ───┘                                        
 2. Stronger entity-cluster inference for shipping lines, builders, classes, and historical subjects
 3. Page Studio handoff for accepted Create/Expand opportunities
 4. Completion verification details surfaced directly in the dashboard
+
+### Pre-publication ship candidates
+
+CuratorOS Ship Records may set `metadata.discoveryCandidate: true` before a public guide exists. Content Opportunity treats that explicit curatorial nomination as sufficient to enter discovery even when the normal two-inbound-relationship threshold has not yet been reached. Unsourced candidates remain **Research** opportunities; candidates with attached evidence can become **Create** opportunities. Once a canonical site page appears, the candidate is suppressed by the normal inventory check.
