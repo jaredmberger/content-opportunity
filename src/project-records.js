@@ -106,8 +106,7 @@ export function projectRecordsRequestHeaders({ accessClientId = '', accessClient
 export async function fetchProjectRecords(endpoint = DEFAULT_PROJECT_RECORDS_URL, auth = {}) {
   const response = await fetch(endpoint, {
     headers: projectRecordsRequestHeaders(auth),
-    cache: 'no-store',
-    cf: { cacheTtl: 0, cacheEverything: false }
+    cache: 'no-store'
   });
   if (!response.ok) throw new Error(`Project Records returned HTTP ${response.status}`);
   const payload = await response.json();
