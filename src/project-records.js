@@ -68,13 +68,25 @@ function inventoryIndex(inventory) {
   return { byUrl, byTitle };
 }
 
-export async function fetchProjectRecords(endpoint = DEFAULT_PROJECT_RECORDS_URL) {
+export function projectRecordsRequestHeaders({ accessClientId = '', accessClientSecret = '' } = {}) {
+  const headers = {
+    accept: 'application/json',
+    'user-agent': 'CuratorOS-Content-Opportunity/0.14 (+https://content.oceanliners.net)'
+  };
+  const clientId = String(accessClientId || '').trim();
+  const clientSecret = String(accessClientSecret || '').trim();
+  if (clientId && clientSecret) {
+    headers['CF-Access-Client-Id'] = clientId;
+    headers['CF-Access-Client-Secret'] = clientSecret;
+  }
+  return headers;
+}
+
+export async function fetchProjectRecords(endpoint = DEFAULT_PROJECT_RECORDS_URL, auth = {}) {
   const response = await fetch(endpoint, {
-    headers: {
-      accept: 'application/json',
-      'user-agent': 'CuratorOS-Content-Opportunity/0.9 (+https://content.oceanliners.net)'
-    },
-    cf: { cacheTtl: 120, cacheEverything: true }
+    headers: projectRecordsRequestHeaders(auth),
+    cache: 'no-store',
+    cf: { cacheTtl: 0, cacheEverything: false }
   });
   if (!response.ok) throw new Error(`Project Records returned HTTP ${response.status}`);
   const payload = await response.json();
