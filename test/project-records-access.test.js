@@ -37,8 +37,7 @@ test('fetchProjectRecords performs an authenticated no-store live read', async (
     assert.equal(captured.init.headers['CF-Access-Client-Id'], 'id');
     assert.equal(captured.init.headers['CF-Access-Client-Secret'], 'secret');
     assert.equal(captured.init.cache, 'no-store');
-    assert.equal(captured.init.cf.cacheTtl, 0);
-    assert.equal(captured.init.cf.cacheEverything, false);
+    assert.equal(captured.init.cf, undefined);
   } finally {
     globalThis.fetch = originalFetch;
   }
