@@ -111,3 +111,49 @@ test('explicit discovery candidates survive the automatic opportunity cap', () =
   assert.ok(result.some(item => item.title === 'SS Curator Nomination'));
   assert.equal(result.filter(item => item.projectRecordEvidence.discoveryCandidate).length, 1);
 });
+
+
+test('ship candidates are not suppressed by same-titled non-ship pages', async () => {
+  const { generateEntityOpportunities, diagnoseDiscoveryCandidates } = await import('../src/project-records.js');
+  const candidate = {
+    id: 'ship:example',
+    title: 'SS Example',
+    type: 'ship',
+    status: 'draft',
+    data: {},
+    sources: [],
+    metadata: { discoveryCandidate: true }
+  };
+  const inventory = {
+    pages: [{ title: 'SS Example', url: 'https://oceanliners.net/research/ss-example' }]
+  };
+
+  const result = generateEntityOpportunities(snapshot([candidate]), inventory);
+  const diagnostics = diagnoseDiscoveryCandidates(snapshot([candidate]), inventory);
+
+  assert.equal(result.length, 1);
+  assert.equal(diagnostics[0].suppressed, false);
+});
+
+test('ship candidates are suppressed by same-titled ship guide pages', async () => {
+  const { generateEntityOpportunities, diagnoseDiscoveryCandidates } = await import('../src/project-records.js');
+  const candidate = {
+    id: 'ship:example',
+    title: 'SS Example',
+    type: 'ship',
+    status: 'draft',
+    data: {},
+    sources: [],
+    metadata: { discoveryCandidate: true }
+  };
+  const inventory = {
+    pages: [{ title: 'SS Example', url: 'https://oceanliners.net/ships/ss-example' }]
+  };
+
+  const result = generateEntityOpportunities(snapshot([candidate]), inventory);
+  const diagnostics = diagnoseDiscoveryCandidates(snapshot([candidate]), inventory);
+
+  assert.equal(result.length, 0);
+  assert.equal(diagnostics[0].suppressed, true);
+  assert.equal(diagnostics[0].suppressionReason, 'matching-canonical-page-title');
+});
