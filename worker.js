@@ -8,7 +8,7 @@ import { fetchProjectRecords, normalizeProjectRecords, generateEntityOpportuniti
 import { makeDiscoverySnapshot, compareDiscovery, reconciliationSummary } from './src/reconciliation.js';
 import { buildFeedbackProfile, applyFeedbackAdjustments, FEEDBACK_STATUSES } from './src/feedback.js';
 
-const APP_VERSION='0.14.1';
+const APP_VERSION='0.14.2';
 const json=(data,init={})=>new Response(JSON.stringify(data,null,2),{...init,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store',...(init.headers||{})}});
 const corsHeaders={'access-control-allow-origin':'*','access-control-allow-methods':'GET,POST,PUT,OPTIONS','access-control-allow-headers':'Content-Type'};
 const WORKFLOW_STATUSES=new Set(['new','reviewed','accepted','in-progress','completed','deferred','dismissed']);
