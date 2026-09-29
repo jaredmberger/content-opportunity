@@ -59,13 +59,34 @@ function inventoryIndex(inventory) {
   const pages = Array.isArray(inventory?.pages) ? inventory.pages : Array.isArray(inventory) ? inventory : [];
   const byUrl = new Set();
   const byTitle = new Set();
+  const shipByTitle = new Set();
   for (const page of pages) {
     const url = normalizeUrl(page?.url || page?.href || page?.canonical || page?.path || '');
     if (url) byUrl.add(url);
     const title = normalizeText(page?.title || page?.name || page?.label || '');
-    if (title) byTitle.add(title);
+    if (title) {
+      byTitle.add(title);
+      const pathname = url ? new URL(url).pathname : String(page?.pathname || page?.path || '');
+      if (/^\/ships\//i.test(pathname)) shipByTitle.add(title);
+    }
   }
-  return { byUrl, byTitle };
+  return { byUrl, byTitle, shipByTitle };
+}
+
+function canonicalCoverage(record, inventory) {
+  const { byUrl, byTitle, shipByTitle } = inventory;
+  const url = publicUrl(record);
+  const title = normalizeText(recordTitle(record));
+  const type = recordType(record);
+  const exactUrl = Boolean(url && byUrl.has(url));
+  const titleMatch = type === 'ship' ? shipByTitle.has(title) : byTitle.has(title);
+  return {
+    hasCanonical: exactUrl || titleMatch,
+    exactUrl,
+    titleMatch,
+    publicUrl: url,
+    normalizedTitle: title
+  };
 }
 
 export function projectRecordsRequestHeaders({ accessClientId = '', accessClientSecret = '' } = {}) {
@@ -113,7 +134,7 @@ export function generateEntityOpportunities(snapshot, inventory, options = {}) {
   const minReferences = Number(options.minReferences ?? 2);
   const maxOpportunities = Number(options.maxOpportunities ?? 80);
   const allowedTypes = new Set((options.allowedTypes || ['ship', 'company', 'builder', 'shipping-line', 'shipping_line', 'line']).map(v => String(v).toLowerCase()));
-  const { byUrl, byTitle } = inventoryIndex(inventory);
+  const inventoryLookup = inventoryIndex(inventory);
   const byId = new Map(records.filter(r => r?.id).map(record => [String(record.id), record]));
   const inbound = new Map(records.filter(r => r?.id).map(record => [String(record.id), []]));
 
@@ -133,9 +154,9 @@ export function generateEntityOpportunities(snapshot, inventory, options = {}) {
     const type = recordType(record);
     if (!id || !title || !allowedTypes.has(type)) continue;
 
-    const url = publicUrl(record);
-    const hasCanonical = Boolean(url && byUrl.has(url)) || byTitle.has(normalizeText(title));
-    if (hasCanonical) continue;
+    const coverage = canonicalCoverage(record, inventoryLookup);
+    const url = coverage.publicUrl;
+    if (coverage.hasCanonical) continue;
 
     const references = [...new Set(inbound.get(id) || [])];
     const discoveryCandidate = record?.metadata?.discoveryCandidate === true;
@@ -200,6 +221,26 @@ export function generateEntityOpportunities(snapshot, inventory, options = {}) {
   // automatic opportunity list hit its size cap.
   const automaticLimit = Math.max(0, maxOpportunities - nominated.length);
   return [...nominated, ...automatic.slice(0, automaticLimit)];
+}
+
+export function diagnoseDiscoveryCandidates(snapshot, inventory) {
+  const records = Array.isArray(snapshot?.records) ? snapshot.records : [];
+  const inventoryLookup = inventoryIndex(inventory);
+  return records
+    .filter(record => record?.metadata?.discoveryCandidate === true)
+    .map(record => {
+      const coverage = canonicalCoverage(record, inventoryLookup);
+      return {
+        id: String(record?.id || ''),
+        title: recordTitle(record),
+        type: recordType(record),
+        status: String(record?.status || ''),
+        sourceCount: sourceCount(record),
+        publicUrl: coverage.publicUrl,
+        suppressed: coverage.hasCanonical,
+        suppressionReason: coverage.exactUrl ? 'exact-canonical-url' : coverage.titleMatch ? 'matching-canonical-page-title' : null
+      };
+    });
 }
 
 export { DEFAULT_PROJECT_RECORDS_URL };
