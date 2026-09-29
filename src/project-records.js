@@ -126,7 +126,8 @@ export function generateEntityOpportunities(snapshot, inventory, options = {}) {
     if (hasCanonical) continue;
 
     const references = [...new Set(inbound.get(id) || [])];
-    if (references.length < minReferences) continue;
+    const discoveryCandidate = record?.metadata?.discoveryCandidate === true;
+    if (!discoveryCandidate && references.length < minReferences) continue;
 
     const sources = sourceCount(record);
     const confidence = confidenceFor(record);
@@ -135,7 +136,7 @@ export function generateEntityOpportunities(snapshot, inventory, options = {}) {
     if (confidence < 0.65) unresolved.push('Project Record confidence is low and should be reviewed before publication.');
 
     const researchFirst = unresolved.length > 0;
-    const importance = Math.min(10, 4 + references.length + Math.min(sources, 3));
+    const importance = Math.min(10, 4 + references.length + Math.min(sources, 3) + (discoveryCandidate ? 2 : 0));
     const cluster = type === 'ship' ? 'Project Records · Ships' : 'Project Records · Entities';
 
     candidates.push({
@@ -156,7 +157,7 @@ export function generateEntityOpportunities(snapshot, inventory, options = {}) {
       unresolvedQuestions: unresolved,
       inventoryResolved: true,
       siteInventoryMatch: null,
-      sources: ['project-records', 'site-inventory'],
+      sources: ['project-records', 'site-inventory', ...(discoveryCandidate ? ['curator-nomination'] : [])],
       projectRecordEvidence: {
         recordId: id,
         recordType: type,
@@ -168,7 +169,8 @@ export function generateEntityOpportunities(snapshot, inventory, options = {}) {
         canonicalPageFound: false,
         inventoryChecked: true,
         corpusVersion: snapshot?.version || 0,
-        corpusUpdatedAt: snapshot?.updatedAt || null
+        corpusUpdatedAt: snapshot?.updatedAt || null,
+        discoveryCandidate
       },
       generatedAutomatically: true
     });
